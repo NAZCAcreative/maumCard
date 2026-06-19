@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, RefreshCw, Save, Megaphone, Sparkles, Coins, ToggleLeft, ToggleRight, Feather, FileText } from "lucide-react";
+import { ChevronLeft, RefreshCw, Save, Megaphone, Sparkles, Coins, ToggleLeft, ToggleRight, Feather, FileText, FlaskConical } from "lucide-react";
 import BottomNav from "@/components/layout/BottomNav";
 
 type AdminSettings = {
@@ -20,6 +20,7 @@ type AdminSettings = {
   hand_paper_style: string;
   hand_compose_font_size: number;
   hand_viewer_font_size: number;
+  whitespace_test_enabled: boolean;
   updated_at: string;
 };
 
@@ -62,6 +63,7 @@ export default function AdminSettingsPage() {
   const [handPaperStyle, setHandPaperStyle] = useState("hanji");
   const [handComposeFontSize, setHandComposeFontSize] = useState(18);
   const [handViewerFontSize, setHandViewerFontSize] = useState(18);
+  const [whitespaceTestEnabled, setWhitespaceTestEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,7 @@ export default function AdminSettingsPage() {
       setHandPaperStyle(next?.hand_paper_style ?? "hanji");
       setHandComposeFontSize(next?.hand_compose_font_size ?? 18);
       setHandViewerFontSize(next?.hand_viewer_font_size ?? 18);
+      setWhitespaceTestEnabled(next?.whitespace_test_enabled ?? false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "설정을 불러오지 못했습니다.");
     } finally {
@@ -129,6 +132,7 @@ export default function AdminSettingsPage() {
           hand_paper_style: handPaperStyle,
           hand_compose_font_size: handComposeFontSize,
           hand_viewer_font_size: handViewerFontSize,
+          whitespace_test_enabled: whitespaceTestEnabled,
         }),
       });
       const data = (await res.json()) as { settings?: AdminSettings; error?: string };
@@ -148,6 +152,7 @@ export default function AdminSettingsPage() {
       setHandPaperStyle(data.settings?.hand_paper_style ?? handPaperStyle);
       setHandComposeFontSize(data.settings?.hand_compose_font_size ?? handComposeFontSize);
       setHandViewerFontSize(data.settings?.hand_viewer_font_size ?? handViewerFontSize);
+      setWhitespaceTestEnabled(data.settings?.whitespace_test_enabled ?? whitespaceTestEnabled);
       setMessage({ ok: true, text: "설정을 저장했습니다." });
     } catch (e) {
       setMessage({ ok: false, text: e instanceof Error ? e.message : "저장에 실패했습니다." });
@@ -261,6 +266,17 @@ export default function AdminSettingsPage() {
                 <ToggleButton checked={aiComposeEnabled} onClick={() => setAiComposeEnabled((v) => !v)} label="카드 'AI로 만들기' 버튼 노출" />
                 <p className="text-xs font-semibold leading-5 text-stone-500">공지 배너와 AI 추천 문구 on/off를 운영에서 바로 바꿉니다.</p>
                 <p className="text-xs font-semibold leading-5 text-stone-500">배경 화면의 “✨ AI 생성” 탭과 글귀 화면의 “AI로 만들기” 버튼 노출을 제어합니다. (기본 비활성화)</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-stone-200 bg-white p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <FlaskConical size={18} className="text-sky-600" />
+                <h2 className="font-black text-stone-900">테스트 도구</h2>
+              </div>
+              <div className="space-y-3">
+                <ToggleButton checked={whitespaceTestEnabled} onClick={() => setWhitespaceTestEnabled((v) => !v)} label="빈영역 탐지 테스트 노출" />
+                <p className="text-xs font-semibold leading-5 text-stone-500">카드 미리보기의 “🔍 빈영역 탐지 테스트” 패널 노출을 제어합니다. (기본 비활성화 = 숨김)</p>
               </div>
             </div>
 

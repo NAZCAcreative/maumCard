@@ -12,8 +12,41 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { text?: string };
+  const body = (await request.json().catch(() => ({}))) as { text?: string; tone?: string };
   if (!body.text?.trim()) return NextResponse.json({ error: "text가 필요합니다." }, { status: 400 });
+
+  // 느낌(말투) 옵션 — 클라이언트 AI_TONE_OPTIONS의 id와 1:1 매칭.
+  const TONE_INSTRUCTIONS: Record<string, string> = {
+    warm: "따뜻하고 다정한 말투로 다듬어 주세요.",
+    polite: "예의 바르고 공손한 말투로 다듬어 주세요.",
+    lovely: "사랑스럽고 애정 어린 말투로 다듬어 주세요.",
+    formal: "정중하고 격식 있는 말투로 다듬어 주세요.",
+    sincere: "진심이 깊이 느껴지는 담백한 말투로 다듬어 주세요.",
+    cheerful: "밝고 유쾌한 말투로 다듬어 주세요.",
+    poetic: "감성적이고 서정적인 말투로 다듬어 주세요.",
+    concise: "군더더기 없이 간결하고 명료한 말투로 다듬어 주세요.",
+    comforting: "마음을 위로하는 부드러운 말투로 다듬어 주세요.",
+    encouraging: "용기를 주고 격려하는 말투로 다듬어 주세요.",
+  };
+  const toneDirective = TONE_INSTRUCTIONS[body.tone ?? ""] ?? "전체적으로 따뜻하고 진심이 느껴지도록 다듬어 주세요.";
+  const isSpellingOnly = body.tone === "spelling";
+
+  const systemContent = isSpellingOnly
+    ? [
+        "You are a Korean proofreader. Fix ONLY spelling, typos, and spacing (띄어쓰기) errors.",
+        "Do NOT change wording, expression, or tone. Keep the original style fully intact.",
+        "Return only JSON with a 'corrected' field that is an array containing exactly 1 corrected Korean text.",
+        "Maintain paragraph breaks (\\n\\n).",
+      ].join(" ")
+    : [
+        "You are a Korean writing editor who corrects spelling and rewrites the text to match a requested tone.",
+        "Return only JSON with a 'corrected' field that is an array of exactly 2 distinct Korean rewrites.",
+        "Both rewrites must keep the original meaning and structure, and fix typos, spacing errors, and awkward phrasing.",
+        `Tone instruction (Korean): ${toneDirective}`,
+        "Apply that tone naturally without being overly dramatic.",
+        "Make the first rewrite stay close to the original wording; make the second a little more expressive.",
+        "Do not add extra sentences. Maintain paragraph breaks (\\n\\n).",
+      ].join(" ");
 
   // Check credits
   const { data: profile } = await supabaseAdmin
@@ -40,13 +73,7 @@ export async function POST(request: Request) {
         messages: [
           {
             role: "system",
-            content: [
-              "You are a Korean writing editor who corrects spelling and makes text more emotionally warm and elegant.",
-              "Return only JSON with a single 'corrected' string field containing the edited Korean text.",
-              "Keep the original meaning and structure. Fix typos, spacing errors, and awkward phrasing.",
-              "Make the tone more heartfelt, sincere, and poetic without being overly dramatic.",
-              "Do not add extra sentences. Maintain paragraph breaks (\\n\\n).",
-            ].join(" "),
+            content: systemContent,
           },
           {
             role: "user",
@@ -63,18 +90,21 @@ export async function POST(request: Request) {
     const raw = data.choices?.[0]?.message?.content;
     if (!raw) throw new Error("응답이 없습니다.");
 
-    const parsed = JSON.parse(raw) as { corrected?: string };
-    if (!parsed.corrected?.trim()) throw new Error("교정 결과가 없습니다.");
+    const parsed = JSON.parse(raw) as { corrected?: string[] | string };
+    const options = (Array.isArray(parsed.corrected) ? parsed.corrected : parsed.corrected ? [parsed.corrected] : [])
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length > 0);
+    if (options.length === 0) throw new Error("수정 결과가 없습니다.");
 
     // Deduct 1 credit
     try {
       await supabaseAdmin.from("profiles").update({ credits: Math.max(0, profile.credits - 1) }).eq("id", user.id);
-      await supabaseAdmin.from("credit_transactions").insert({ user_id: user.id, amount: -1, reason: "AI 맞춤법 교정" });
+      await supabaseAdmin.from("credit_transactions").insert({ user_id: user.id, amount: -1, reason: "AI 문장 수정" });
     } catch {
       // non-critical
     }
 
-    return NextResponse.json({ corrected: parsed.corrected.trim() });
+    return NextResponse.json({ corrected: options });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "AI 교정 실패" }, { status: 500 });
   }

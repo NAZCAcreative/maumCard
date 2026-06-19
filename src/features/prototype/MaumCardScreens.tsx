@@ -27,6 +27,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Type,
   User,
   X,
 } from "lucide-react";
@@ -44,6 +45,7 @@ import { CreditBalance } from "@/features/payment/components/CreditBalance";
 import { isAdminEmail } from "@/lib/adminAccess";
 import { CARD_FONTS } from "@/lib/card-fonts";
 import { ThemePanel } from "@/components/layout/ThemeSettings";
+import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import type { Database } from "@/types/supabase";
 import Image from "next/image";
 
@@ -58,6 +60,12 @@ type CardItem = {
   favorite?: boolean;
   cardImageUrl?: string | null;
 };
+type TextBox = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+};
 type Draft = {
   purpose: Purpose | "";
   name: string;
@@ -69,14 +77,25 @@ type Draft = {
   handTone: HandTone;
   handMode: "recommend" | "direct";
   directMode?: boolean; // 직접입력(명언) 진입 의도 — 재정렬 흐름에서 URL 파라미터 대체
+  messageOrigin?: "direct" | "recommend" | "ai";
   title?: string; // 카드 제목 (받는분 대체, 큰 글씨)
   titleFont?: string; // 제목 글씨체 (card-fonts id)
   contentFont?: string; // 내용 글씨체 (card-fonts id)
+  footerFont?: string; // 보내는 사람 글씨체
   cardPosition?: "auto" | "top" | "center" | "bottom"; // 글씨 배치
+  textBox?: TextBox; // 미리보기에서 직접 선택한 글씨 영역
+  titleTextBox?: TextBox;
+  contentTextBox?: TextBox;
+  footerTextBox?: TextBox;
+  titleRotation?: number;
+  contentRotation?: number;
+  footerRotation?: number;
   titleScale?: number; // 제목 크기 배율 (기본 1)
   contentScale?: number; // 내용 크기 배율 (기본 1)
+  footerScale?: number; // 보내는 사람 크기 배율 (기본 1)
   titleColor?: string; // 제목 글자색 ("auto" 또는 hex)
   contentColor?: string; // 내용 글자색 ("auto" 또는 hex)
+  footerColor?: string; // 보내는 사람 글자색 ("auto" 또는 hex)
   footer?: string; // 하단 메세지 (내용 아래)
   authorEnabled?: boolean; // 작성자 표시 여부
   author?: string; // 작성자 이름
@@ -84,7 +103,28 @@ type Draft = {
 
 type HandFont = "round" | "brush" | "pen";
 type HandTone = "general" | "love";
-type RecommendationCategory = Exclude<Purpose, "hand"> | "all";
+type RecommendationCategory = Exclude<Purpose, "hand"> | "all" | "mine";
+type PreviewTextPart = "title" | "content" | "footer";
+type PreviewTextMetrics = {
+  titleSize: number;
+  contentSize: number;
+  footerSize: number;
+  titleColor: string;
+  contentColor: string;
+  footerColor: string;
+  titleShadow: string;
+  contentShadow: string;
+};
+type DefaultTextBoxes = {
+  titleTextBox: TextBox;
+  contentTextBox: TextBox;
+  footerTextBox: TextBox;
+};
+type WsRegion = {
+  cx: number; cy: number; x0: number; y0: number; x1: number; y1: number;
+  band: "top" | "center" | "bottom";
+  density: number; emptiness: number; wRatio: number; hRatio: number;
+};
 
 const defaultDraft: Draft = {
   purpose: "",
@@ -100,23 +140,294 @@ const defaultDraft: Draft = {
 
 const draftStorageKey = "maumcard:draft";
 
-function hasDraftProgress(draft: Draft) {
-  return Boolean(
-    draft.purpose ||
-      draft.name.trim() ||
-      draft.recipientPreset ||
-      draft.message.trim() ||
-      draft.title?.trim() ||
-      draft.footer?.trim() ||
-      draft.author?.trim() ||
-      draft.bg !== defaultDraft.bg,
-  );
+function clampUnit(value: number) {
+  return Math.min(1, Math.max(0, value));
 }
 
-function getDraftResumeHref(draft: Draft) {
-  if (draft.message.trim()) return "/create/preview";
-  if (draft.bg && draft.bg !== defaultDraft.bg) return "/create/message";
-  return "/create/background";
+function normalizeTextBox(a: { x: number; y: number }, b: { x: number; y: number }): TextBox {
+  const minSize = 0.08;
+  let x0 = Math.min(a.x, b.x);
+  let y0 = Math.min(a.y, b.y);
+  let x1 = Math.max(a.x, b.x);
+  let y1 = Math.max(a.y, b.y);
+
+  if (x1 - x0 < minSize) {
+    const cx = (x0 + x1) / 2;
+    x0 = clampUnit(cx - minSize / 2);
+    x1 = clampUnit(cx + minSize / 2);
+  }
+  if (y1 - y0 < minSize) {
+    const cy = (y0 + y1) / 2;
+    y0 = clampUnit(cy - minSize / 2);
+    y1 = clampUnit(cy + minSize / 2);
+  }
+
+  return { x0, y0, x1, y1 };
+}
+
+type TextBoxSizingDraft = Pick<Draft, "message"> &
+  Partial<Pick<Draft, "title" | "footer" | "author" | "authorEnabled" | "titleScale" | "contentScale" | "footerScale">>;
+
+function clampRange(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function centeredTextBox(width: number, y0: number, height: number): TextBox {
+  const safeWidth = clampRange(width, 0.24, 0.9);
+  const x0 = (1 - safeWidth) / 2;
+  return { x0, y0, x1: x0 + safeWidth, y1: y0 + height };
+}
+
+// 본문(BODY) 우측 가장자리에 우측 정렬해 배치 — footer를 본문 하단 오른쪽에 두기 위함.
+function rightAlignedTextBox(width: number, y0: number, height: number, rightEdge: number): TextBox {
+  const safeWidth = clampRange(width, 0.24, 0.9);
+  const x1 = clampRange(rightEdge, safeWidth + 0.04, 0.96);
+  const x0 = x1 - safeWidth;
+  return { x0, y0, x1, y1: y0 + height };
+}
+
+function getTextLines(text: string, charsPerLine: number) {
+  const paragraphs = text.trim().split(/\n+/).filter(Boolean);
+  if (!paragraphs.length) return 1;
+  return paragraphs.reduce((sum, paragraph) => sum + Math.max(1, Math.ceil(paragraph.length / charsPerLine)), 0);
+}
+
+const CARD_PREVIEW_WIDTH = 1024;
+const CARD_PREVIEW_HEIGHT = 1536;
+const TEXT_BOX_PAD_X = 8;
+const TEXT_BOX_PAD_Y = 4;
+
+function estimateFontPx(kind: PreviewTextPart, text: string, scale = 1) {
+  const len = text.replace(/\s/g, "").length;
+  if (kind === "title") return clampRange((len <= 6 ? 150 : len <= 12 ? 124 : 104) * scale, 72, 170);
+  if (kind === "footer") return clampRange((len <= 14 ? 62 : 52) * scale, 40, 78);
+  if (len <= 12) return clampRange(168 * scale, 96, 220);
+  if (len <= 24) return clampRange(138 * scale, 82, 190);
+  if (len <= 55) return clampRange(104 * scale, 64, 150);
+  if (len <= 100) return clampRange(78 * scale, 52, 118);
+  return clampRange(58 * scale, 42, 92);
+}
+
+function estimateRenderedLines(text: string, fontPx: number, boxWidthRatio: number) {
+  const availableWidth = Math.max(80, boxWidthRatio * CARD_PREVIEW_WIDTH - TEXT_BOX_PAD_X * 2);
+  const charsPerLine = Math.max(1, Math.floor(availableWidth / (fontPx * 1.02)));
+  return getTextLines(text, charsPerLine);
+}
+
+function fitInlineContentSize(availW: number, availH: number, text: string, lineHeight = 1.36, scale = 1) {
+  const len = text.replace(/\s/g, "").length;
+  const max = len <= 12 ? 156 : len <= 24 ? 142 : 128;
+  for (let fontSize = max; fontSize >= 40; fontSize -= 2) {
+    const lines = getTextLines(text, Math.max(1, Math.floor(availW / (fontSize * 1.02))));
+    if (lines * fontSize * lineHeight <= availH) return fontSize * scale;
+  }
+  return 40 * scale;
+}
+
+// 미리보기 기본 폰트 비율 — TITLE/FOOTER는 BODY(본문) 크기를 기준으로 파생한다.
+const PREVIEW_TITLE_BODY_RATIO = 1.5;
+const PREVIEW_FOOTER_BODY_RATIO = 0.7;
+
+function getInlineFontSize(part: PreviewTextPart, availableBox: TextBox, draft: Draft) {
+  const typography = getRecommendedTypography(draft);
+  const availableWidth = Math.max(180, (availableBox.x1 - availableBox.x0) * CARD_PREVIEW_WIDTH - 24);
+  const availableHeight = Math.max(140, (availableBox.y1 - availableBox.y0) * CARD_PREVIEW_HEIGHT - 24);
+
+  // BODY(본문) 기준 크기를 먼저 산출한다.
+  const reservedRatio = (draft.title?.trim() ? 0.17 : 0) + (draft.footer?.trim() ? 0.12 : 0);
+  const bodyHeight = availableHeight * clampRange(0.76 - reservedRatio, 0.5, 0.76);
+  const bodySize = fitInlineContentSize(
+    availableWidth,
+    bodyHeight,
+    draft.message || " ",
+    1.36,
+    draft.contentScale ?? typography.contentScale,
+  );
+
+  if (part === "content") return bodySize;
+  // 기본: TITLE = BODY × 1.5, FOOTER = BODY × 0.7 (사용자 수동 배율은 위에 곱함)
+  if (part === "footer") return Math.round(bodySize * PREVIEW_FOOTER_BODY_RATIO * (draft.footerScale ?? 1));
+  return Math.round(bodySize * PREVIEW_TITLE_BODY_RATIO * (draft.titleScale ?? 1));
+}
+
+function insertLineBreakAtCursor() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const lineBreak = document.createElement("br");
+  const caretAnchor = document.createTextNode("\u200b");
+  range.insertNode(lineBreak);
+  lineBreak.after(caretAnchor);
+  range.setStartAfter(caretAnchor);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function readEditableText(element: HTMLElement) {
+  const readChildren = (parent: Node): string => {
+    let result = "";
+    for (const node of Array.from(parent.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        result += node.textContent ?? "";
+        continue;
+      }
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.tagName === "BR") {
+        result += "\n";
+        continue;
+      }
+      const isBlock = node.tagName === "DIV" || node.tagName === "P";
+      if (isBlock && result && !result.endsWith("\n")) result += "\n";
+      result += readChildren(node);
+      if (isBlock && node.nextSibling && !result.endsWith("\n")) result += "\n";
+    }
+    return result;
+  };
+  return readChildren(element).replace(/\u200b/g, "").replace(/\u00a0/g, " ").replace(/^\n|\n$/g, "");
+}
+
+function estimateBoxHeightRatio(kind: PreviewTextPart, text: string, fontPx: number, boxWidthRatio: number) {
+  const lineHeight = kind === "content" ? 1.36 : kind === "footer" ? 1.28 : 1.18;
+  const lines = estimateRenderedLines(text, fontPx, boxWidthRatio);
+  const verticalPadding = kind === "content" ? 18 : kind === "footer" ? 14 : 16;
+  const px = lines * fontPx * lineHeight + verticalPadding;
+  const min = kind === "content" ? 0.075 : kind === "footer" ? 0.06 : 0.07;
+  const max = kind === "content" ? 0.34 : kind === "footer" ? 0.13 : 0.16;
+  return clampRange(px / CARD_PREVIEW_HEIGHT, min, max);
+}
+
+function getDefaultBoxMetrics(draft?: TextBoxSizingDraft) {
+  const title = draft?.title?.trim() ?? "";
+  const message = draft?.message.trim() ?? "";
+  const footerParts = [
+    draft?.footer?.trim(),
+    draft?.authorEnabled && draft?.author?.trim() ? draft.author.trim() : "",
+  ].filter(Boolean);
+  const footer = footerParts.join("\n");
+  const recommendedTypography = getRecommendedTypography({ ...defaultDraft, message, title });
+  const titleScale = draft?.titleScale ?? recommendedTypography.titleScale;
+  const contentScale = draft?.contentScale ?? recommendedTypography.contentScale;
+
+  const titleLen = title.length || 5;
+  const contentLen = message.length || 8;
+  const footerLen = footer.replace(/\s/g, "").length || 6;
+
+  const titleW = clampRange(0.3 + titleLen * 0.024 * titleScale, 0.38, 0.68);
+  const contentW = clampRange(0.52 + Math.min(contentLen, 110) * 0.0032 * contentScale, 0.64, 0.84);
+  const footerW = clampRange(0.28 + footerLen * 0.017, 0.36, 0.62);
+  const titleH = clampRange(
+    estimateBoxHeightRatio("title", title || "TITLE", estimateFontPx("title", title || "TITLE", titleScale), titleW),
+    0.075,
+    0.16,
+  );
+  const contentH = estimateBoxHeightRatio("content", message || "BODY", estimateFontPx("content", message || "BODY", contentScale), contentW);
+  const footerH = estimateBoxHeightRatio("footer", footer || "FOOTER", estimateFontPx("footer", footer || "FOOTER", draft?.footerScale ?? 1), footerW);
+
+  return { titleH, contentH, footerH, titleW, contentW, footerW };
+}
+
+function stackVisibleTextBoxes(startY: number, metrics: ReturnType<typeof getDefaultBoxMetrics>, hasTitle: boolean, hasFooter: boolean): DefaultTextBoxes {
+  const titleBodyGap = 0.035;
+  const bodyFooterGap = 0.04;
+  let y = clampUnit(startY);
+  const titleTextBox = centeredTextBox(metrics.titleW, y, metrics.titleH);
+  if (hasTitle) y = titleTextBox.y1 + titleBodyGap;
+
+  const contentTextBox = centeredTextBox(metrics.contentW, y, metrics.contentH);
+  y = contentTextBox.y1 + bodyFooterGap;
+
+  // footer는 본문(BODY) 하단 오른쪽 — 본문 우측 가장자리에 정렬
+  const footerTextBox = rightAlignedTextBox(metrics.footerW, hasFooter ? y : contentTextBox.y1 + bodyFooterGap, metrics.footerH, contentTextBox.x1);
+  return { titleTextBox, contentTextBox, footerTextBox };
+}
+
+function getDefaultPartTextBox(part: "title" | "content" | "footer", position?: Draft["cardPosition"], draft?: TextBoxSizingDraft): TextBox {
+  const boxes = getDefaultPartTextBoxes(position, draft);
+  if (part === "title") return boxes.titleTextBox;
+  if (part === "footer") return boxes.footerTextBox;
+  return boxes.contentTextBox;
+}
+
+function getDefaultPartTextBoxes(position?: Draft["cardPosition"], draft?: TextBoxSizingDraft): DefaultTextBoxes {
+  const metrics = getDefaultBoxMetrics(draft);
+  const titleBodyGap = 0.035;
+  const bodyFooterGap = 0.04;
+  const hasTitle = Boolean(draft?.title?.trim());
+  const hasFooter = Boolean(draft?.footer?.trim() || (draft?.authorEnabled && draft?.author?.trim()));
+  if (!hasTitle && !hasFooter) {
+    const bodyOnlyHeight = clampRange(metrics.contentH * 1.06, 0.12, 0.42);
+    const bodyOnlyWidth = clampRange(metrics.contentW * 1.08, 0.72, 0.88);
+    const contentTextBox = centeredTextBox(bodyOnlyWidth, position === "top" ? 0.16 : position === "bottom" ? 0.78 - bodyOnlyHeight : 0.5 - bodyOnlyHeight / 2, bodyOnlyHeight);
+    const titleTextBox = centeredTextBox(metrics.titleW, Math.max(0.06, contentTextBox.y0 - titleBodyGap - metrics.titleH), metrics.titleH);
+    const footerTextBox = rightAlignedTextBox(metrics.footerW, Math.min(0.92 - metrics.footerH, contentTextBox.y1 + bodyFooterGap), metrics.footerH, contentTextBox.x1);
+    return { titleTextBox, contentTextBox, footerTextBox };
+  }
+  const totalH =
+    (hasTitle ? metrics.titleH + titleBodyGap : 0) +
+    metrics.contentH +
+    (hasFooter ? bodyFooterGap + metrics.footerH : 0);
+  if (position === "top") {
+    return stackVisibleTextBoxes(0.07, metrics, hasTitle, hasFooter);
+  }
+  if (position === "bottom") {
+    return stackVisibleTextBoxes(Math.max(0.08, 0.9 - totalH), metrics, hasTitle, hasFooter);
+  }
+  return stackVisibleTextBoxes(Math.max(0.08, 0.5 - totalH / 2), metrics, hasTitle, hasFooter);
+}
+
+function applyWhitespaceRegionToBoxes(boxes: DefaultTextBoxes, region: WsRegion | null): DefaultTextBoxes {
+  if (!region) return boxes;
+  const allBoxes = [boxes.titleTextBox, boxes.contentTextBox, boxes.footerTextBox];
+  const groupTop = Math.min(...allBoxes.map((box) => box.y0));
+  const groupBottom = Math.max(...allBoxes.map((box) => box.y1));
+  const groupLeft = Math.min(...allBoxes.map((box) => box.x0));
+  const groupRight = Math.max(...allBoxes.map((box) => box.x1));
+  const contentCx = (boxes.contentTextBox.x0 + boxes.contentTextBox.x1) / 2;
+  const contentCy = (boxes.contentTextBox.y0 + boxes.contentTextBox.y1) / 2;
+  const safeX0 = 0.055;
+  const safeX1 = 0.945;
+  const safeY0 = 0.06;
+  const safeY1 = 0.94;
+  const desiredDx = region.cx - contentCx;
+  const desiredDy = region.cy - contentCy;
+  const dx = clampRange(desiredDx, safeX0 - groupLeft, safeX1 - groupRight);
+  const dy = clampRange(desiredDy, safeY0 - groupTop, safeY1 - groupBottom);
+  const move = (box: TextBox): TextBox => ({
+    x0: box.x0 + dx,
+    y0: box.y0 + dy,
+    x1: box.x1 + dx,
+    y1: box.y1 + dy,
+  });
+  return {
+    titleTextBox: move(boxes.titleTextBox),
+    contentTextBox: move(boxes.contentTextBox),
+    footerTextBox: move(boxes.footerTextBox),
+  };
+}
+
+function getRecommendedTypography(draft: Draft) {
+  const messageLength = draft.message.trim().length;
+  const titleLength = draft.title?.trim().length ?? 0;
+  const isShort = messageLength > 0 && messageLength < 28;
+  const bodyOnly = !draft.title?.trim() && !draft.footer?.trim() && !(draft.authorEnabled && draft.author?.trim());
+  const purpose = draft.purpose || "custom";
+  const contentFont =
+    bodyOnly ? "gaegubold" :
+    messageLength > 90 ? "gaegu" :
+    purpose === "hand" ? "pen" :
+    purpose === "love" || purpose === "thanks" || purpose === "comfort" ? "pen" :
+    purpose === "birthday" || purpose === "congrats" ? "gaegubold" :
+    "gaegu";
+
+  return {
+    titleFont: "himelody",
+    contentFont,
+    titleScale: titleLength > 12 ? 0.82 : titleLength > 8 ? 0.9 : 1,
+    contentScale: bodyOnly && messageLength <= 12 ? 1.08 : bodyOnly && messageLength <= 24 ? 1.04 : bodyOnly && isShort ? 1 : messageLength > 0 && messageLength <= 24 ? 1 : isShort ? 1 : messageLength > 100 ? 0.92 : messageLength > 55 ? 0.96 : 1,
+    cardPosition: "auto" as const,
+  };
 }
 
 
@@ -246,6 +557,7 @@ const longMessagesByPurpose: Record<Purpose, string[]> = {
 
 const recommendationCategoryLabels: Record<RecommendationCategory, string> = {
   all: "전체",
+  mine: "내 문구",
   birthday: "생일",
   love: "안부",
   health: "건강",
@@ -259,6 +571,7 @@ const recommendationCategoryLabels: Record<RecommendationCategory, string> = {
 
 const recommendationCategoryOrder: RecommendationCategory[] = [
   "all",
+  "mine",
   "birthday",
   "love",
   "health",
@@ -271,7 +584,8 @@ const recommendationCategoryOrder: RecommendationCategory[] = [
 ];
 
 function getOrderedRecommendationCategories(anchor: RecommendationCategory) {
-  if (anchor === "all") return recommendationCategoryOrder.slice(1);
+  if (anchor === "all") return recommendationCategoryOrder.filter((category) => category !== "all" && category !== "mine");
+  if (anchor === "mine") return [];
   // 특정 카테고리 선택 시 해당 카테고리만 노출 (목록 길이 단축)
   return [anchor];
 }
@@ -281,7 +595,6 @@ function getRecommendedGroups(
   anchor: RecommendationCategory,
 ): Array<{ purpose: Exclude<Purpose, "hand">; label: string; messages: string[] }> {
   return getOrderedRecommendationCategories(anchor)
-    .filter((purpose): purpose is Exclude<Purpose, "hand"> => purpose !== "all")
     .map((purpose) => ({
       purpose,
       label: recommendationCategoryLabels[purpose],
@@ -511,6 +824,32 @@ function useSupabaseCards() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const updateComposedImage = useCallback(async (cardId: string | null, composedImageBlob: Blob): Promise<string | null> => {
+    if (!cardId || cardId.startsWith("sample-")) return null;
+
+    if (cardId.startsWith("local-")) {
+      const localUrl = URL.createObjectURL(composedImageBlob);
+      const local = readJson<CardItem[]>("maumcard:cards", []);
+      writeJson("maumcard:cards", local.map((c) => (c.id === cardId ? { ...c, cardImageUrl: localUrl } : c)));
+      setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, cardImageUrl: localUrl } : c)));
+      return localUrl;
+    }
+
+    const supabase = createClient();
+    const fileName = `cards/${Date.now()}_${Math.random().toString(36).slice(2)}.png`;
+    const { error: uploadError } = await supabase.storage
+      .from("card-images")
+      .upload(fileName, composedImageBlob, { contentType: "image/png", upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(fileName);
+    await updateCardImageUrl(cardId, publicUrl);
+    const images = readJson<Record<string, string>>("maumcard:card-images", {});
+    writeJson("maumcard:card-images", { ...images, [cardId]: publicUrl });
+    setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, cardImageUrl: publicUrl } : c)));
+    return publicUrl;
+  }, []);
+
   const addCard = useCallback(async (draft: Draft, composedImageBlob?: Blob | null): Promise<string | null> => {
     // 보관함 제목 = 미리보기 제목(없으면 내용 일부)
     const cardTitle = draft.title?.trim() || draft.message?.trim().slice(0, 12) || "무제";
@@ -604,7 +943,7 @@ function useSupabaseCards() {
     await dbDeleteAllCards().catch((e) => console.error("전체 삭제 실패:", e));
   }, []);
 
-  return { cards, loading, addCard, toggleFav, hideCard, deleteCard, deleteAll };
+  return { cards, loading, addCard, updateComposedImage, toggleFav, hideCard, deleteCard, deleteAll };
 }
 
 type AnnivItem = Database["public"]["Tables"]["anniversaries"]["Row"];
@@ -664,6 +1003,7 @@ type PublicUiSettings = {
   hand_paper_style: string;
   hand_compose_font_size: number;
   hand_viewer_font_size: number;
+  whitespace_test_enabled: boolean;
 };
 
 function usePublicUiSettings() {
@@ -677,6 +1017,7 @@ function usePublicUiSettings() {
     hand_paper_style: "hanji",
     hand_compose_font_size: 18,
     hand_viewer_font_size: 18,
+    whitespace_test_enabled: false,
   });
 
   useEffect(() => {
@@ -693,6 +1034,7 @@ function usePublicUiSettings() {
           hand_paper_style: typeof d.hand_paper_style === "string" && d.hand_paper_style.trim() ? d.hand_paper_style : prev.hand_paper_style,
           hand_compose_font_size: typeof d.hand_compose_font_size === "number" ? d.hand_compose_font_size : prev.hand_compose_font_size,
           hand_viewer_font_size: typeof d.hand_viewer_font_size === "number" ? d.hand_viewer_font_size : prev.hand_viewer_font_size,
+          whitespace_test_enabled: typeof d.whitespace_test_enabled === "boolean" ? d.whitespace_test_enabled : prev.whitespace_test_enabled,
         }));
       })
       .catch(() => {});
@@ -1102,12 +1444,9 @@ export function HomeScreen() {
   const { items: homeCards } = useHomeFeaturedCards();
   const { user, loading: authLoading } = useAuth();
   const [themeOpen, setThemeOpen] = useState(false);
-  const [draft, , draftHydrated, resetDraft] = useDraft();
   const recentCards = cards.filter((c) => !c.id.startsWith("sample-")).slice(0, 4);
   const featuredCard = recentCards[0] ?? cards[0];
   const featuredHomeCard = homeCards[0] ?? null;
-  const hasResumeDraft = draftHydrated && hasDraftProgress(draft);
-  const resumeHref = getDraftResumeHref(draft);
   const homeBackground = dbBackgrounds.find((bg) => bg.category === "home") ?? dbBackgrounds[0];
   const upcomingItems = [
     ...anniversaries.map((item) => ({
@@ -1210,37 +1549,6 @@ export function HomeScreen() {
             <h2 className="text-lg font-black leading-tight text-stone-900">{displayName}님 <span className="text-primary">오늘도 따뜻한 하루!</span></h2>
           </div>
         </section>
-
-        {hasResumeDraft && (
-          <section className="mb-5 rounded-2xl border border-primary/20 bg-surface-container-low p-4 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-on-primary">
-                <Pencil size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-black text-stone-900">작성 중인 카드가 있어요</p>
-                <p className="mt-1 truncate text-xs font-semibold text-stone-500">
-                  {draft.title?.trim() || draft.message.trim() || "이전에 고른 카드 설정을 이어서 완성해보세요."}
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-              <Link
-                href={resumeHref}
-                className="flex h-11 items-center justify-center rounded-xl bg-[#7b310d] text-sm font-black text-white transition active:scale-[0.98]"
-              >
-                이어서 만들기
-              </Link>
-              <button
-                type="button"
-                onClick={resetDraft}
-                className="h-11 rounded-xl border border-stone-200 bg-white px-4 text-sm font-bold text-stone-500 transition hover:bg-stone-50 active:scale-[0.98]"
-              >
-                새로
-              </button>
-            </div>
-          </section>
-        )}
 
         {/* 다가오는 기념일 */}
         {visibleUpcomingItems.length > 0 && (
@@ -1432,19 +1740,38 @@ type ShortMode = "recommend" | "direct" | "ai";
 type LongMode = "long_recommend" | "direct" | "long_ai";
 type HandMode = "hand_recommend" | "direct" | "hand_ai";
 
+// AI 문장 수정 — 직접입력에서 고를 수 있는 느낌(말투) 옵션 10가지. id는 /api/ai-correct의 TONE_INSTRUCTIONS와 매칭.
+const AI_TONE_OPTIONS: { id: string; label: string }[] = [
+  { id: "warm", label: "따뜻하게" },
+  { id: "polite", label: "예의바르게" },
+  { id: "lovely", label: "사랑스럽게" },
+  { id: "formal", label: "정중하게" },
+  { id: "sincere", label: "진심을 담아" },
+  { id: "cheerful", label: "유쾌하게" },
+  { id: "poetic", label: "감성적으로" },
+  { id: "concise", label: "간결하게" },
+  { id: "comforting", label: "위로가 되게" },
+  { id: "encouraging", label: "격려하듯" },
+];
+
 export function MessageScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isDirect = searchParams.get("mode") === "direct";
   const initialLength = searchParams.get("length");
   const requestedPurpose = searchParams.get("purpose");
-  const [draft, setDraft] = useDraft();
-  const { isSaved: isFavSaved, toggle: toggleFavMsg } = useFavMessages();
-  const [length, setLength] = useState<MsgLength>(initialLength === "long" || initialLength === "hand" ? initialLength : "short");
+  const [draft, setDraft, draftHydrated] = useDraft();
+  const messageEntryResetRef = useRef(false);
+  const {
+    favorites: myMessages,
+    loading: myMessagesLoading,
+    isSaved: isFavSaved,
+    toggle: toggleFavMsg,
+  } = useFavMessages();
+  const [length, setLength] = useState<MsgLength>(initialLength === "hand" ? "hand" : "short");
   const [shortMode, setShortMode] = useState<ShortMode>(isDirect ? "direct" : "recommend");
   const [longMode, setLongMode] = useState<LongMode>(isDirect ? "direct" : "long_recommend");
   const [handMode, setHandMode] = useState<HandMode>(isDirect ? "direct" : "hand_recommend");
-  const [decoOpen, setDecoOpen] = useState(false);
   const aiEnabled = useAiEnabled();
   const uiSettings = usePublicUiSettings();
   const handMessageMaxLength = handMessageMaxLengthByTone.general;
@@ -1464,8 +1791,43 @@ export function MessageScreen() {
   const [longAiError, setLongAiError] = useState<string | null>(null);
 
   const [correcting, setCorrecting] = useState(false);
-  const [correctedText, setCorrectedText] = useState<string | null>(null);
+  const [correctedOptions, setCorrectedOptions] = useState<string[] | null>(null);
   const [correctError, setCorrectError] = useState<string | null>(null);
+  const [correctTone, setCorrectTone] = useState<string>(AI_TONE_OPTIONS[0].id);
+
+  useEffect(() => {
+    if (!draftHydrated || messageEntryResetRef.current) return;
+    messageEntryResetRef.current = true;
+    setDraft({
+      message: "",
+      messageOrigin: undefined,
+      title: "",
+      footer: "",
+      authorEnabled: false,
+      author: "",
+      textBox: undefined,
+      titleTextBox: undefined,
+      contentTextBox: undefined,
+      footerTextBox: undefined,
+      titleRotation: undefined,
+      contentRotation: undefined,
+      footerRotation: undefined,
+      titleScale: undefined,
+      contentScale: undefined,
+      titleColor: undefined,
+      contentColor: undefined,
+      footerColor: undefined,
+      titleFont: undefined,
+      contentFont: undefined,
+    });
+    setAiMessages([]);
+    setAiError(null);
+    setAiFallback(false);
+    setLongAiMessages([]);
+    setLongAiError(null);
+    setCorrectedOptions(null);
+    setCorrectError(null);
+  }, [draftHydrated, setDraft]);
 
   const selectedPurpose = draft.purpose || "love";
   const [recommendCategory, setRecommendCategory] = useState<RecommendationCategory>(
@@ -1526,106 +1888,162 @@ export function MessageScreen() {
       setDraft({ purpose: "custom" });
     }
     if (requestedPurpose === "hand" && draft.purpose !== "hand") {
-      setDraft({ purpose: "hand", handTone: "general", honorific: "에게", handMode: "recommend", titleFont: "nanumgothic", contentFont: "nanumgothic" });
+      setDraft({ purpose: "hand", handTone: "general", honorific: "에게", handMode: "recommend", titleFont: "himelody", contentFont: "pen" });
     }
   }, [draft.purpose, requestedPurpose, setDraft]);
 
-  const fetchAiCorrect = useCallback(async () => {
+  const fetchAiCorrect = useCallback(async (toneOverride?: string) => {
     if (!draft.message.trim() || correcting) return;
     setCorrecting(true);
     setCorrectError(null);
-    setCorrectedText(null);
+    setCorrectedOptions(null);
     try {
       const res = await fetch("/api/ai-correct", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: draft.message }),
+        body: JSON.stringify({ text: draft.message, tone: toneOverride ?? correctTone }),
       });
-      const data = await res.json() as { corrected?: string; error?: string };
-      if (!res.ok || data.error) throw new Error(data.error ?? "교정 실패");
-      setCorrectedText(data.corrected ?? null);
+      const data = await res.json() as { corrected?: string[] | string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "수정 실패");
+      const options = (Array.isArray(data.corrected) ? data.corrected : data.corrected ? [data.corrected] : [])
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter((item) => item.length > 0);
+      setCorrectedOptions(options.length > 0 ? options : null);
     } catch (err) {
-      setCorrectError(err instanceof Error ? err.message : "AI 교정 실패");
+      setCorrectError(err instanceof Error ? err.message : "AI 문장 수정 실패");
     } finally {
       setCorrecting(false);
     }
-  }, [correcting, draft.message]);
+  }, [correcting, draft.message, correctTone]);
+
+  const myMessagesPanel = (
+    <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50/40 p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-1.5 text-sm font-black text-[#7b310d]">
+          <Bookmark size={15} className="fill-[#7b310d]" />
+          내 문구
+        </h3>
+        <span className="text-[11px] font-semibold text-stone-400">
+          {myMessagesLoading ? "불러오는 중..." : `${myMessages.length}개`}
+        </span>
+      </div>
+      {!myMessagesLoading && myMessages.length === 0 ? (
+        <p className="mt-2 text-xs font-semibold leading-5 text-stone-400">
+          보관함의 내용보기에서 마음에 드는 문구를 저장해보세요.
+        </p>
+      ) : (
+        <div className="mt-2 max-h-72 space-y-2 overflow-y-auto">
+          {myMessages.map((item) => (
+            <div
+              key={item.id}
+              className={`flex items-center gap-2 rounded-lg border bg-white ${
+                draft.message === item.text ? "border-[#d98238] ring-1 ring-[#d98238]/30" : "border-stone-200"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setDraft({ message: item.text, messageOrigin: "recommend", contentRotation: undefined })}
+                className="flex-1 whitespace-pre-wrap px-3 py-2.5 text-left text-sm leading-6 text-stone-700"
+              >
+                {item.text}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFavMsg(item.text, item.purpose ?? undefined)}
+                className="shrink-0 p-3 text-[#7b310d]"
+                aria-label="내 문구에서 삭제"
+              >
+                <Bookmark size={16} className="fill-current" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <PhoneShell backHref="/create/background">
       <div className="space-y-5">
+        {/* 카드 꾸미기 — 받는 사람·보내는 사람 */}
+        <div className="space-y-3 rounded-xl border border-stone-200 p-4">
+          <div className="flex items-center gap-2 text-sm font-black text-stone-700">
+            카드 꾸미기 <span className="text-xs font-normal text-stone-400">(선택)</span>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-stone-500">받는 사람</label>
+            <input
+              type="text"
+              value={draft.title ?? ""}
+              onChange={(e) => setDraft({ title: e.target.value })}
+              placeholder="예: 사랑하는 엄마께, 민수에게"
+              maxLength={20}
+              className="mt-1.5 h-11 w-full rounded-lg border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-stone-500">보내는 사람</label>
+            <input
+              type="text"
+              value={draft.footer ?? ""}
+              onChange={(e) => setDraft({ footer: e.target.value })}
+              placeholder="예: 사랑하는 딸 지은이가"
+              maxLength={40}
+              className="mt-1.5 h-11 w-full rounded-lg border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
+            />
+          </div>
+        </div>
+
         <div>
           <StepLabel n={1}>전하고 싶은 글귀를 선택하거나 입력해주세요.</StepLabel>
 
-          {/* 단문 / 장문 / 손편지 토글 */}
-          <div className="mt-3 flex rounded-lg bg-stone-100 p-0.5">
-            {(["short", "long", "hand"] as MsgLength[]).map((l) => (
+          {/* 단문추천 / 장문추천 / 직접입력 */}
+          <div className="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-stone-100 p-1">
+            {([
+              ["short", "단문추천"],
+              ["long", "장문추천"],
+              ["direct", "직접입력"],
+            ] as const).map(([mode, label]) => {
+              const active =
+                mode === "short" ? length === "short" && shortMode === "recommend"
+                : mode === "long" ? length === "long" && longMode === "long_recommend"
+                : isDirectMode;
+              return (
               <button
-                key={l}
+                key={mode}
                 onClick={() => {
-                  if (l !== length) {
-                    setLength(l);
-                    setDraft(l === "hand" ? { message: "", handTone: "general", honorific: "에게", handMode: "recommend", titleFont: "nanumgothic", contentFont: "nanumgothic" } : { message: "" });
-                    if (l === "hand") setHandMode("hand_recommend");
-                    else if (l === "short") setShortMode("recommend");
-                    else setLongMode("long_recommend");
+                  if (active) return;
+                  if (mode === "short") {
+                    setLength("short");
+                    setShortMode("recommend");
+                    setDraft({ message: "", messageOrigin: undefined, contentRotation: undefined });
+                  } else if (mode === "long") {
+                    setLength("long");
+                    setLongMode("long_recommend");
+                    setDraft({ message: "", messageOrigin: undefined, contentRotation: undefined });
+                  } else {
+                    setLength("hand");
+                    setHandMode("direct");
+                    setDraft({
+                      message: "",
+                      messageOrigin: "direct",
+                      contentRotation: undefined,
+                      handTone: "general",
+                      handMode: "direct",
+                      titleFont: "himelody",
+                      contentFont: "pen",
+                    });
                   }
                 }}
-                className={`flex-1 h-9 rounded-md text-sm font-bold transition-all ${length === l ? "bg-[#7b310d] text-white shadow" : "text-stone-500"}`}
+                className={`h-11 rounded-lg text-sm font-black transition-all ${
+                  active ? "bg-[#7b310d] text-white shadow" : "text-stone-500 hover:bg-white"
+                }`}
               >
-                {l === "short" ? "단문" : l === "long" ? "✍️ 장문 캘리그래피" : "💌 손편지"}
+                {label}
               </button>
-            ))}
+              );
+            })}
           </div>
-
-          {/* 단문 모드 탭 */}
-          {length === "short" && (
-            <div className={`mt-2 grid gap-2 ${aiEnabled ? "grid-cols-3" : "grid-cols-2"}`}>
-              {(["recommend", "direct", ...(aiEnabled ? ["ai"] : [])] as ShortMode[]).map((m) => (
-                <button key={m} onClick={() => setShortMode(m)}
-                  className={`h-10 rounded-md border text-sm font-bold ${shortMode === m ? "border-[#d98238] bg-orange-50 text-[#7b310d]" : "border-stone-200"}`}>
-                  {m === "recommend" ? "추천 글귀" : m === "direct" ? "직접 입력" : "AI 추천"}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* 장문 모드 탭 */}
-          {length === "long" && (
-            <div className={`mt-2 grid gap-2 ${aiEnabled ? "grid-cols-3" : "grid-cols-2"}`}>
-              {(["long_recommend", "direct", ...(aiEnabled ? ["long_ai"] : [])] as LongMode[]).map((m) => (
-                <button key={m} onClick={() => setLongMode(m)}
-                  className={`h-10 rounded-md border text-sm font-bold ${longMode === m ? "border-[#d98238] bg-orange-50 text-[#7b310d]" : "border-stone-200"}`}>
-                  {m === "long_recommend" ? "장문 추천" : m === "direct" ? "직접 입력" : "장문 AI"}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* 손편지 모드 탭 */}
-          {length === "hand" && (
-            <div className="mt-2 space-y-2">
-              <div className="grid gap-2 grid-cols-2">
-                {(["hand_recommend", "direct"] as HandMode[]).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      setHandMode(m);
-                      setDraft({ handMode: m === "direct" ? "direct" : "recommend" });
-                    }}
-                    className={`h-10 rounded-md border text-sm font-bold ${handMode === m ? "border-[#d98238] bg-orange-50 text-[#7b310d]" : "border-stone-200"}`}>
-                    {m === "hand_recommend" ? "손편지 추천" : "직접 입력"}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {length === "hand" && (
-            <div className="mt-3 rounded-xl border border-dashed border-stone-200 bg-stone-50 px-4 py-3 text-sm font-semibold leading-6 text-stone-500">
-              손편지는 하나의 흐름으로 제공됩니다. 추천 문구를 고르거나 바로 입력해보세요.
-            </div>
-          )}
 
           {/* 직접 입력 */}
           {isDirectMode ? (
@@ -1634,8 +2052,8 @@ export function MessageScreen() {
                 value={draft.message}
                 onChange={(e) => {
                   const nextValue = e.target.value.slice(0, handMessageMaxLength);
-                  setDraft({ message: nextValue });
-                  setCorrectedText(null);
+                  setDraft({ message: nextValue, messageOrigin: "direct", contentRotation: undefined });
+                  setCorrectedOptions(null);
                 }}
                 placeholder={length === "hand"
                   ? "마음을 담아 손편지처럼 길게 써보세요."
@@ -1651,34 +2069,91 @@ export function MessageScreen() {
                   {draft.message.length}/{handMessageMaxLength}
                 </p>
               )}
-              {(length === "long" || length === "hand") && draft.message.trim().length > 0 && (
+              {draft.message.trim().length > 0 && (
                 <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-                  <button
-                    onClick={fetchAiCorrect}
-                    disabled={correcting}
-                    className="h-10 w-full rounded-lg bg-gradient-to-r from-violet-600 to-[#7b310d] text-sm font-bold text-white disabled:opacity-60"
-                  >
-                    {correcting ? "✨ AI 교정 중..." : "✨ AI 맞춤법 · 감성 교정 (1C)"}
-                  </button>
-                  {correctError && <p className="mt-2 text-xs font-semibold text-red-600">{correctError}</p>}
-                  {correctedText && (
-                    <div className="mt-3 rounded-lg border border-violet-200 bg-white p-3">
-                      <p className="mb-1 text-xs font-bold text-violet-600">AI 교정 결과 미리보기</p>
-                      <p className="whitespace-pre-line text-sm leading-7 text-stone-800">{correctedText}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          onClick={() => { setDraft({ message: correctedText }); setCorrectedText(null); }}
-                          className="flex-1 rounded-md bg-violet-600 py-2 text-xs font-bold text-white"
-                        >
-                          교정본 적용
-                        </button>
-                        <button
-                          onClick={() => setCorrectedText(null)}
-                          className="rounded-md border border-stone-200 px-4 py-2 text-xs font-bold text-stone-600 hover:bg-stone-50"
-                        >
-                          닫기
-                        </button>
+                  {length === "short" ? (
+                    // 단문: 맞춤법 바로잡기만 (느낌 옵션 없음)
+                    <button
+                      onClick={() => fetchAiCorrect("spelling")}
+                      disabled={correcting}
+                      className="h-10 w-full rounded-lg bg-gradient-to-r from-violet-600 to-[#7b310d] text-sm font-bold text-white disabled:opacity-60"
+                    >
+                      {correcting ? "✨ 바로잡는 중..." : "✨ 맞춤법 바로잡기 (1C)"}
+                    </button>
+                  ) : length === "hand" ? (
+                    // 손편지 직접입력: 느낌 선택 없이 문장 수정만 제공
+                    <button
+                      onClick={() => fetchAiCorrect("sincere")}
+                      disabled={correcting}
+                      className="h-10 w-full rounded-lg bg-gradient-to-r from-violet-600 to-[#7b310d] text-sm font-bold text-white disabled:opacity-60"
+                    >
+                      {correcting ? "✨ AI가 다듬는 중..." : "✨ AI 문장 수정 (1C)"}
+                    </button>
+                  ) : (
+                    // 장문: 느낌 옵션 + AI 문장 수정
+                    <>
+                      <p className="mb-2 text-xs font-bold text-violet-700">느낌 선택</p>
+                      <div className="mb-3 flex flex-wrap gap-1.5">
+                        {AI_TONE_OPTIONS.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setCorrectTone(option.id)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                              correctTone === option.id
+                                ? "bg-violet-600 text-white"
+                                : "bg-white text-stone-600 ring-1 ring-stone-200 hover:bg-stone-50"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
                       </div>
+                      <button
+                        onClick={() => fetchAiCorrect()}
+                        disabled={correcting}
+                        className="h-10 w-full rounded-lg bg-gradient-to-r from-violet-600 to-[#7b310d] text-sm font-bold text-white disabled:opacity-60"
+                      >
+                        {correcting ? "✨ AI가 다듬는 중..." : "✨ AI 문장 수정 (1C)"}
+                      </button>
+                    </>
+                  )}
+                  {correctError && <p className="mt-2 text-xs font-semibold text-red-600">{correctError}</p>}
+                  {correctedOptions && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-violet-600">원문과 비교 후 선택하세요</p>
+                        <button onClick={() => setCorrectedOptions(null)} className="text-xs font-bold text-stone-400 hover:text-stone-600">닫기</button>
+                      </div>
+
+                      {/* 원문 */}
+                      <div className="rounded-lg border border-stone-200 bg-white p-3">
+                        <p className="mb-1 text-[11px] font-black uppercase tracking-wide text-stone-400">원문</p>
+                        <p className="whitespace-pre-line text-sm leading-7 text-stone-600">{draft.message}</p>
+                      </div>
+
+                      {/* AI 수정안들 */}
+                      {correctedOptions.map((option, index) => {
+                        const selected = draft.message === option;
+                        return (
+                          <button
+                            key={`${index}-${option.slice(0, 12)}`}
+                            type="button"
+                            onClick={() => setDraft({ message: option, messageOrigin: "direct", contentRotation: undefined })}
+                            className={`w-full rounded-lg border-2 p-3 text-left transition ${
+                              selected ? "border-violet-500 bg-violet-50" : "border-violet-200 bg-white hover:bg-violet-50/50"
+                            }`}
+                          >
+                            <span className="mb-1 flex items-center justify-between">
+                              <span className="text-[11px] font-black uppercase tracking-wide text-violet-600">
+                                ✨ AI 수정안 {correctedOptions.length > 1 ? index + 1 : ""}
+                              </span>
+                              {selected && <span className="text-[11px] font-bold text-violet-600">선택됨 ✓</span>}
+                            </span>
+                            <span className="block whitespace-pre-line text-sm leading-7 text-stone-900">{option}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1734,8 +2209,10 @@ export function MessageScreen() {
                 </div>
               )}
 
-              {length === "short" && shortMode === "recommend" && (
-                <div className="mt-4 space-y-4">
+              {length === "short" && shortMode === "recommend" && recommendCategory === "mine" && myMessagesPanel}
+
+              {length === "short" && shortMode === "recommend" && recommendCategory !== "mine" && (
+                <div className="mt-4 max-h-[50vh] space-y-4 overflow-y-auto overscroll-contain pr-1">
                   {shortRecommendGroups.map((group) => (
                     <div key={group.purpose}>
                       <div className="mb-2 flex items-center justify-between">
@@ -1745,7 +2222,7 @@ export function MessageScreen() {
                       <div className="space-y-2">
                         {group.messages.map((msg) => (
                           <div key={msg} className={`flex items-center gap-2 rounded-md border ${draft.message === msg ? "border-[#d98238] bg-orange-50" : "border-stone-200"}`}>
-                            <button onClick={() => setDraft({ message: msg })} className="flex flex-1 items-center gap-2 p-3 text-left text-sm leading-6">
+                            <button onClick={() => setDraft({ message: msg, messageOrigin: "recommend", contentRotation: undefined })} className="flex flex-1 items-center gap-2 p-3 text-left text-sm leading-6">
                               <Heart size={16} className={`shrink-0 ${draft.message === msg ? "fill-[#d98238] text-[#d98238]" : "text-stone-300"}`} />
                               <span>{msg}</span>
                             </button>
@@ -1763,7 +2240,7 @@ export function MessageScreen() {
                 <div className="space-y-2">
                   {aiMessages.map((msg) => (
                     <div key={msg} className={`flex items-center gap-2 rounded-md border ${draft.message === msg ? "border-[#d98238] bg-orange-50" : "border-stone-200"}`}>
-                      <button onClick={() => setDraft({ message: msg })} className="flex flex-1 items-center gap-2 p-3 text-left text-sm leading-6">
+                      <button onClick={() => setDraft({ message: msg, messageOrigin: "ai", contentRotation: undefined })} className="flex flex-1 items-center gap-2 p-3 text-left text-sm leading-6">
                         <Heart size={16} className={`shrink-0 ${draft.message === msg ? "fill-[#d98238] text-[#d98238]" : "text-stone-300"}`} />
                         <span>{msg}</span>
                       </button>
@@ -1793,7 +2270,9 @@ export function MessageScreen() {
                 </div>
               )}
 
-              {length === "long" && longMode === "long_recommend" && (
+              {length === "long" && longMode === "long_recommend" && recommendCategory === "mine" && myMessagesPanel}
+
+              {length === "long" && longMode === "long_recommend" && recommendCategory !== "mine" && (
                 <div className="mt-4 space-y-4">
                   {longRecommendGroups.map((group) => (
                     <div key={group.purpose}>
@@ -1811,7 +2290,7 @@ export function MessageScreen() {
                                 {isFavSaved(msg) ? "저장됨" : "저장"}
                               </button>
                               <button
-                                onClick={() => setDraft({ message: msg })}
+                                onClick={() => setDraft({ message: msg, messageOrigin: "recommend", contentRotation: undefined })}
                                 className={`rounded-md px-4 py-1.5 text-xs font-bold ${draft.message === msg ? "bg-[#7b310d] text-white" : "border border-[#7b310d] text-[#7b310d]"}`}
                               >
                                 {draft.message === msg ? "선택됨 ✓" : "이 글로 카드 만들기"}
@@ -1835,7 +2314,7 @@ export function MessageScreen() {
                           {isFavSaved(msg) ? "저장됨" : "저장"}
                         </button>
                         <button
-                          onClick={() => setDraft({ message: msg })}
+                          onClick={() => setDraft({ message: msg, messageOrigin: "ai", contentRotation: undefined })}
                           className={`rounded-md px-4 py-1.5 text-xs font-bold ${draft.message === msg ? "bg-[#7b310d] text-white" : "border border-[#7b310d] text-[#7b310d]"}`}
                         >
                           {draft.message === msg ? "선택됨 ✓" : "이 글로 카드 만들기"}
@@ -1859,7 +2338,7 @@ export function MessageScreen() {
                         {isFavSaved(msg) ? "저장됨" : "저장"}
                       </button>
                       <button
-                        onClick={() => setDraft({ message: msg })}
+                        onClick={() => setDraft({ message: msg, messageOrigin: "recommend", contentRotation: undefined })}
                         className={`rounded-md px-4 py-1.5 text-xs font-bold ${draft.message === msg ? "bg-[#7b310d] text-white" : "border border-[#7b310d] text-[#7b310d]"}`}
                       >
                         {draft.message === msg ? "선택됨 ✓" : "이 편지로 카드 만들기"}
@@ -1871,82 +2350,6 @@ export function MessageScreen() {
             </div>
           )}
         </div>
-
-        {/* 카드 꾸미기 — 제목·하단메세지·작성자를 하나의 접이식 패널로 통합 (선택) */}
-        {(() => {
-          const decoCount =
-            (draft.title?.trim() ? 1 : 0) +
-            (draft.footer?.trim() ? 1 : 0) +
-            (draft.authorEnabled && draft.author?.trim() ? 1 : 0);
-          return (
-            <div className="rounded-xl border border-stone-200">
-              <button
-                type="button"
-                onClick={() => setDecoOpen((v) => !v)}
-                className="flex w-full items-center justify-between px-4 py-3 text-left"
-              >
-                <div className="flex items-center gap-2">
-                  <StepLabel n={2}>카드 꾸미기 <span className="font-normal text-stone-400">(선택)</span></StepLabel>
-                  {decoCount > 0 && (
-                    <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-bold text-[#7b310d]">{decoCount}개 설정됨</span>
-                  )}
-                </div>
-                <ChevronDown size={18} className={`shrink-0 text-stone-400 transition-transform duration-200 ${decoOpen ? "rotate-180" : ""}`} />
-              </button>
-
-              {decoOpen && (
-                <div className="space-y-3 border-t border-stone-100 px-4 pb-4 pt-3">
-                  {/* 카드 제목 */}
-                  <div>
-                    <label className="text-xs font-bold text-stone-500">카드 제목 <span className="font-normal text-stone-400">· 상단 큰 글씨</span></label>
-                    <input
-                      type="text"
-                      value={draft.title ?? ""}
-                      onChange={(e) => setDraft({ title: e.target.value })}
-                      placeholder="예: 고마워요, 생일 축하해, 사랑합니다"
-                      maxLength={20}
-                      className="mt-1.5 h-11 w-full rounded-lg border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
-                    />
-                  </div>
-                  {/* 하단 메세지 */}
-                  <div>
-                    <label className="text-xs font-bold text-stone-500">하단 메세지 <span className="font-normal text-stone-400">· 내용 아래 작게</span></label>
-                    <input
-                      type="text"
-                      value={draft.footer ?? ""}
-                      onChange={(e) => setDraft({ footer: e.target.value })}
-                      placeholder="예: 늘 고맙습니다 · 2026.06.11"
-                      maxLength={40}
-                      className="mt-1.5 h-11 w-full rounded-lg border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
-                    />
-                  </div>
-                  {/* 작성자 */}
-                  <div>
-                    <label className="flex cursor-pointer items-center justify-between">
-                      <span className="text-xs font-bold text-stone-500">작성자 표시 <span className="font-normal text-stone-400">· 보내는 사람</span></span>
-                      <input
-                        type="checkbox"
-                        checked={draft.authorEnabled ?? false}
-                        onChange={(e) => setDraft({ authorEnabled: e.target.checked })}
-                        className="h-4 w-4 accent-[#7b310d]"
-                      />
-                    </label>
-                    {draft.authorEnabled && (
-                      <input
-                        type="text"
-                        value={draft.author ?? ""}
-                        onChange={(e) => setDraft({ author: e.target.value })}
-                        placeholder="보내는 사람 (예: 문주)"
-                        maxLength={20}
-                        className="mt-2 h-11 w-full rounded-lg border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
 
         <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-stone-100 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           {!canGoNext && (
@@ -2070,17 +2473,11 @@ const BG_CATEGORIES = [
   { id: "pattern", label: "🎨 패턴" },
 ];
 
-type WsRegion = {
-  cx: number; cy: number; x0: number; y0: number; x1: number; y1: number;
-  band: "top" | "center" | "bottom";
-  density: number; emptiness: number; wRatio: number; hRatio: number;
-};
-
 export function BackgroundScreen() {
   const router = useRouter();
   const [draft, setDraft] = useDraft();
   const uiSettings = usePublicUiSettings();
-  const [tab, setTab] = useState<"gallery" | "basic" | "ai">("gallery");
+  const [tab, setTab] = useState<"gallery" | "ai">("gallery");
   const [catFilter, setCatFilter] = useState("all");
   const [aiPrompt, setAiPrompt] = useState("");
   const { loading: aiLoading, progress: aiProgress, url: aiUrl, error: aiError, generate: aiGenerate, reset: aiReset } = useAIBackground();
@@ -2154,21 +2551,20 @@ export function BackgroundScreen() {
       <h1 className="text-center text-2xl font-black leading-9">마음에 드는 배경을<br />선택해주세요.</h1>
       {/* 재정렬 흐름: 배경(1단계) */}
 
-      {/* 탭 */}
-      <div className={`mt-5 grid gap-1 rounded-xl bg-stone-100 p-1 ${uiSettings.ai_background_enabled ? "grid-cols-3" : "grid-cols-2"}`}>
-        {(uiSettings.ai_background_enabled
-          ? ([["gallery", "배경 갤러리"], ["basic", "기본 배경"], ["ai", "✨ AI 생성"]] as const)
-          : ([["gallery", "배경 갤러리"], ["basic", "기본 배경"]] as const)
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`h-10 rounded-lg text-xs font-bold transition ${tab === key ? "bg-[#7b310d] text-white shadow" : "text-stone-600"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* 탭 — 배경 갤러리 / ✨ AI 생성. AI 비활성 시 갤러리만 남으므로 탭바를 숨긴다. */}
+      {uiSettings.ai_background_enabled && (
+        <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1">
+          {([["gallery", "배경 갤러리"], ["ai", "✨ AI 생성"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`h-10 rounded-lg text-xs font-bold transition ${tab === key ? "bg-[#7b310d] text-white shadow" : "text-stone-600"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 저장된 배경 갤러리 */}
       {tab === "gallery" && (
@@ -2218,9 +2614,6 @@ export function BackgroundScreen() {
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={bg.url} alt={bg.name} className="h-full w-full object-cover" />
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-2">
-                        <p className="text-[10px] font-bold text-white truncate">{bg.name}</p>
-                      </div>
                       {selected && (
                         <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[#7b310d] text-white">
                           <Check size={13} />
@@ -2232,26 +2625,6 @@ export function BackgroundScreen() {
             </div>
           </>
         )
-      )}
-
-      {/* 기본 그라디언트 배경 */}
-      {tab === "basic" && (
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          {backgrounds.map((bg) => (
-            <button
-              key={bg.id}
-              onClick={() => setDraft({ bg: bg.id })}
-              className={`relative grid aspect-[3/4] place-items-center rounded-xl bg-gradient-to-br ${bg.swatch} text-4xl ${draft.bg === bg.id ? "ring-4 ring-[#7b310d]" : ""}`}
-            >
-              {bg.mark}
-              {draft.bg === bg.id && (
-                <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#7b310d] text-white">
-                  <Check size={13} />
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
       )}
 
       {/* AI 생성 */}
@@ -2318,7 +2691,8 @@ export function BackgroundScreen() {
         </div>
       )}
 
-      {/* 빈영역 탐지 테스트 */}
+      {/* 빈영역 탐지 테스트 (관리자 설정에서 노출 시에만 표시) */}
+      {uiSettings.whitespace_test_enabled && (
       <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-stone-600">🔍 빈영역 탐지 테스트</span>
@@ -2364,6 +2738,7 @@ export function BackgroundScreen() {
           </p>
         )}
       </div>
+      )}
 
       <div className="mt-6">
         <PrimaryButton onClick={() => router.push(messageHref)}>다음</PrimaryButton>
@@ -2377,35 +2752,150 @@ export function PreviewScreen() {
   const searchParams = useSearchParams();
   const useAi = searchParams.get("ai") === "1"; // 배경 화면의 "AI로 만들기" → AI 합성
   const [draft, setDraft, draftHydrated] = useDraft();
-  const [adjusting, setAdjusting] = useState(false);
-  const [adjTab, setAdjTab] = useState<"title" | "content">("title");
+  const [adjTab, setAdjTab] = useState<"title" | "content" | "footer">("title");
+  const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const { addCard } = useSupabaseCards();
   const uiSettings = usePublicUiSettings();
   const { hand_paper_enabled, hand_paper_style } = uiSettings;
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [shareOpen, setShareOpen] = useState(false);
-  const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [cardImageUrl, setCardImageUrl] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [debugPrompt, setDebugPrompt] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
-  const savedRef = useRef(false);
+  const [typographyReady, setTypographyReady] = useState(false);
+  const [whitespaceReady, setWhitespaceReady] = useState(false);
+  const [previewWsRegion, setPreviewWsRegion] = useState<WsRegion | null>(null);
+  const [showTextBoxes, setShowTextBoxes] = useState(true);
+  const [selectedTextBoxPart, setSelectedTextBoxPart] = useState<PreviewTextPart | null>("title");
+  const [inlineEditingPart, setInlineEditingPart] = useState<PreviewTextPart | null>(null);
+  const [inlineEditingInitialText, setInlineEditingInitialText] = useState("");
+  const [cardPreviewScale, setCardPreviewScale] = useState(1);
+  const typographyInitializedRef = useRef(false);
+  const manuallyPositionedPartsRef = useRef<Set<PreviewTextPart>>(new Set());
+  const undoStackRef = useRef<Draft[]>([]);
+  const areaDragStartRef = useRef<{
+    mode: "move" | "draw" | "rotate" | "resize-left" | "resize-right" | "resize-top" | "resize-bottom";
+    part: PreviewTextPart;
+    point: { x: number; y: number };
+    box?: TextBox;
+    startRotation?: number; // 회전 시작 시점의 각도
+    startPointerAngle?: number; // 회전 시작 시점, 중심→포인터 각도
+  } | null>(null);
+  const inlineEditorRef = useRef<HTMLDivElement>(null);
+  const inlineEditingValueRef = useRef("");
+  const cardPreviewRef = useRef<HTMLDivElement>(null);
+  const previewTextRefs = useRef<Partial<Record<PreviewTextPart, HTMLDivElement>>>({});
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  const card = useMemo<CardItem>(() => ({
-    id: `card-${Date.now()}`,
-    name: draft.title?.trim() || draft.message?.trim().slice(0, 12) || "무제",
-    purpose: draft.purpose || "love",
-    message: draft.message || "당신을 응원합니다. 오늘도 행복하세요.",
-    bg: draft.bg || "flower",
-    createdAt: new Date().toLocaleDateString("ko-KR").replace(/\.$/, ""),
-  }), [draft]);
+  const pushUndoSnapshot = useCallback(() => {
+    undoStackRef.current = [...undoStackRef.current.slice(-19), { ...draftRef.current }];
+  }, []);
 
-  const createCardImage = useCallback(async (useAI = false, mode?: "sub" | "pay", signal?: AbortSignal): Promise<{ url: string; blob: Blob }> => {
+  const setDraftWithUndo = useCallback((next: Partial<Draft>) => {
+    pushUndoSnapshot();
+    setDraft(next);
+  }, [pushUndoSnapshot, setDraft]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+      const previous = undoStackRef.current.pop();
+      if (!previous) return;
+      event.preventDefault();
+      setDraft(previous);
+      setShowTextBoxes(true);
+      setSelectedTextBoxPart(adjTab);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [adjTab, setDraft]);
+
+  useEffect(() => {
+    const preview = cardPreviewRef.current;
+    if (!preview) return;
+    const updateScale = () => setCardPreviewScale(preview.getBoundingClientRect().width / CARD_PREVIEW_WIDTH);
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, [cardImageUrl]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    let cancelled = false;
+    setWhitespaceReady(false);
+    setPreviewWsRegion(null);
+    if (!draft.bg) {
+      setWhitespaceReady(true);
+      return;
+    }
+    fetch("/api/whitespace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bg: draft.bg }),
+    })
+      .then((res) => res.json())
+      .then((data: { region?: WsRegion }) => {
+        if (!cancelled) setPreviewWsRegion(data.region ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewWsRegion(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWhitespaceReady(true);
+      });
+    return () => { cancelled = true; };
+  }, [draft.bg, draftHydrated]);
+
+  useEffect(() => {
+    if (!draftHydrated || !whitespaceReady) return;
+    if (useAi) {
+      setTypographyReady(true);
+      return;
+    }
+    if (typographyInitializedRef.current) return;
+    typographyInitializedRef.current = true;
+    manuallyPositionedPartsRef.current.clear();
+    const typography = getRecommendedTypography(draft);
+    const defaultBoxes = applyWhitespaceRegionToBoxes(getDefaultPartTextBoxes("auto", draft), previewWsRegion);
+    const hasTitle = Boolean(draft.title?.trim());
+    const hasFooter = Boolean(draft.footer?.trim() || (draft.authorEnabled && draft.author?.trim()));
+    // 제목이 없으면(내용만 있는 카드) 미리보기 진입 시 "내용" 탭이 선택되도록.
+    const initialPart: PreviewTextPart = hasTitle ? "title" : "content";
+    setAdjTab(initialPart);
+    setSelectedTextBoxPart(initialPart);
+    setDraft({
+      titleFont: typography.titleFont,
+      contentFont: typography.contentFont,
+      titleScale: typography.titleScale,
+      contentScale: typography.contentScale,
+      contentRotation: undefined,
+      cardPosition: "auto",
+      titleTextBox: hasTitle ? defaultBoxes.titleTextBox : undefined,
+      contentTextBox: defaultBoxes.contentTextBox,
+      footerTextBox: hasFooter ? defaultBoxes.footerTextBox : undefined,
+    });
+    setTypographyReady(true);
+  }, [draftHydrated, draft, previewWsRegion, setDraft, useAi, whitespaceReady]);
+
+  const getResolvedTextBoxes = useCallback((source: Draft): DefaultTextBoxes => {
+    const defaultBoxes = applyWhitespaceRegionToBoxes(getDefaultPartTextBoxes(source.cardPosition, source), previewWsRegion);
+    const hasTitle = Boolean(source.title?.trim());
+    const hasFooter = Boolean(source.footer?.trim() || (source.authorEnabled && source.author?.trim()));
+    return {
+      titleTextBox: hasTitle ? source.titleTextBox ?? defaultBoxes.titleTextBox : defaultBoxes.titleTextBox,
+      contentTextBox: source.contentTextBox ?? source.textBox ?? defaultBoxes.contentTextBox,
+      footerTextBox: hasFooter ? source.footerTextBox ?? defaultBoxes.footerTextBox : defaultBoxes.footerTextBox,
+    };
+  }, [previewWsRegion]);
+
+  const createCardImage = useCallback(async (useAI = false, mode?: "sub" | "pay", signal?: AbortSignal, omitTextPart?: PreviewTextPart): Promise<{ url: string; blob: Blob; boxes: DefaultTextBoxes; textMetrics: PreviewTextMetrics | null }> => {
     const d = draftRef.current;
+    const recommendedTypography = getRecommendedTypography(d);
+    const resolvedBoxes = getResolvedTextBoxes(d);
     // 하단 메세지 + 작성자 → 카드 하단 추가 문구
     const subText = [
       d.footer?.trim(),
@@ -2428,101 +2918,74 @@ export function PreviewScreen() {
           ai_compose: useAI,
           api_mode: mode,
           // 미리보기 수동 조정
-          title_font: d.titleFont,
-          content_font: d.contentFont,
+          title_font: d.titleFont ?? recommendedTypography.titleFont,
+          content_font: d.contentFont ?? recommendedTypography.contentFont,
+          footer_font: d.footerFont ?? d.contentFont ?? recommendedTypography.contentFont,
           position: d.cardPosition,
-          title_scale: d.titleScale,
-          content_scale: d.contentScale,
+          title_scale: d.titleScale ?? recommendedTypography.titleScale,
+          content_scale: d.contentScale ?? recommendedTypography.contentScale,
+          footer_scale: d.footerScale ?? 1,
           title_color: d.titleColor,
           content_color: d.contentColor,
+          footer_color: d.footerColor,
           sub_text: subText,
+          text_box: d.textBox,
+          title_box: d.title?.trim() ? resolvedBoxes.titleTextBox : undefined,
+          content_box: resolvedBoxes.contentTextBox,
+          footer_box: subText ? resolvedBoxes.footerTextBox : undefined,
+          title_rotation: d.titleRotation ?? 0,
+          content_rotation: d.contentRotation ?? 0,
+          footer_rotation: d.footerRotation ?? 0,
+          omit_text_part: omitTextPart,
       }),
       signal,
     });
     if (!res.ok) throw new Error("card image failed");
     const promptHeader = res.headers.get("X-AI-Prompt");
     if (promptHeader) setDebugPrompt(decodeURIComponent(promptHeader));
+    const metricsHeader = res.headers.get("X-Card-Text-Metrics");
+    const textMetrics = metricsHeader ? JSON.parse(decodeURIComponent(metricsHeader)) as PreviewTextMetrics : null;
     const blob = await res.blob();
-    return { url: URL.createObjectURL(blob), blob };
-  }, [hand_paper_enabled, hand_paper_style]);
+    return { url: URL.createObjectURL(blob), blob, boxes: resolvedBoxes, textMetrics };
+  }, [getResolvedTextBoxes, hand_paper_enabled, hand_paper_style]);
+
+  const createBackgroundImage = useCallback(async (signal?: AbortSignal) => {
+    const res = await fetch("/api/card-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bg: draftRef.current.bg || "flower", background_only: true }),
+      signal,
+    });
+    if (!res.ok) throw new Error("card background failed");
+    return URL.createObjectURL(await res.blob());
+  }, []);
 
   // AI(OpenAI) 감성 합성은 백엔드 모듈(card-ai-compose)로 분리됨.
   // 프론트에서 다시 노출하려면 createCardImage(true, "sub")를 버튼에 연결.
 
   useEffect(() => {
-    if (!draftHydrated) return;
+    if (!draftHydrated || !typographyReady || !whitespaceReady) return;
     const abortController = new AbortController();
-    const startedAt = Date.now();
-    // 무료 로컬 렌더는 즉시(짧은 연출), AI 합성은 수십 초 → 긴 진행 연출
-    const duration = useAi ? 90000 : 1400;
-    const progressTimer = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const linear = Math.min(elapsed / duration, 0.985);
-      const wave = Math.sin(elapsed / 360) * 0.9 + Math.sin(elapsed / 970) * 0.45;
-      const value = Math.min(99.38, Math.max(0, linear * 96 + wave));
-      setProgress(value);
-    }, 80);
-
-    const minimumTimer = window.setTimeout(async () => {
+    const loadPreview = async () => {
       try {
-        const [result] = await Promise.all([
-          createCardImage(useAi, useAi ? "sub" : undefined, abortController.signal),
-          new Promise((resolve) => window.setTimeout(resolve, Math.max(0, duration - (Date.now() - startedAt)))),
-        ]);
+        const imageUrl = await createBackgroundImage(abortController.signal);
         if (abortController.signal.aborted) return;
-        const { url: imageUrl, blob: imageBlob } = result as { url: string; blob: Blob };
         setCardImageUrl(imageUrl);
         setProgress(100);
         setDone(true);
-        if (!savedRef.current) {
-          savedRef.current = true;
-          const id = await addCard(draftRef.current, imageBlob);
-          setSavedCardId(id);
-        }
       } catch {
         if (abortController.signal.aborted) return;
-        setGenerationError(useAi ? "AI 감성 합성에 실패했습니다. 다시 시도해주세요." : "카드 생성에 실패했습니다. 다시 시도해주세요.");
+        setGenerationError("카드 배경을 불러오지 못했습니다. 다시 시도해주세요.");
         setProgress(100);
         setDone(true);
-        if (!savedRef.current) {
-          savedRef.current = true;
-          addCard(draftRef.current, null).then(setSavedCardId).catch(console.error);
-        }
-      } finally {
-        window.clearInterval(progressTimer);
       }
-    }, 0);
+    };
+    void loadPreview();
 
     return () => {
       abortController.abort();
-      window.clearInterval(progressTimer);
-      window.clearTimeout(minimumTimer);
     };
-  }, [addCard, createCardImage, draftHydrated, useAi]);
-
-  // 미리보기 조정(글씨체/배치/크기) 변경 시 로컬 렌더 재생성
-  const adjustKey = [
-    draft.titleFont ?? "", draft.contentFont ?? "", draft.cardPosition ?? "", draft.titleScale ?? 1, draft.contentScale ?? 1,
-    draft.titleColor ?? "", draft.contentColor ?? "", draft.title ?? "", draft.message ?? "",
-  ].join("|");
-  useEffect(() => {
-    if (!done || useAi) return;
-    let cancelled = false;
-    setAdjusting(true);
-    // 디바운스 (추가문구 타이핑 등 연속 변경 대응)
-    const timer = window.setTimeout(async () => {
-      try {
-        const { url } = await createCardImage(false, undefined);
-        if (!cancelled) setCardImageUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
-      } catch {
-        /* 조정 재생성 실패 무시 */
-      } finally {
-        if (!cancelled) setAdjusting(false);
-      }
-    }, 450);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adjustKey]);
+  }, [createBackgroundImage, draftHydrated, typographyReady, whitespaceReady]);
 
   // 생성 시작부터 뒤로가기 차단 — 홈으로 보냄 (진행 중 이탈 시 API 낭비 방지)
   useEffect(() => {
@@ -2532,20 +2995,636 @@ export function PreviewScreen() {
     return () => window.removeEventListener("popstate", onPop);
   }, [router]);
 
-  const downloadCard = useCallback(async () => {
-    if (!cardImageUrl || downloading) return;
-    setDownloading(true);
-    try {
-      const a = document.createElement("a");
-      a.href = cardImageUrl;
-      a.download = `마음카드_${card.name}_${Date.now()}.png`;
-      a.click();
-    } catch {
-      window.alert("이미지 저장에 실패했습니다.");
-    } finally {
-      setDownloading(false);
+  const finalizeCard = useCallback(async (destination?: "/library") => {
+    if (finalizing) return;
+    if (inlineEditingPart) {
+      const value = inlineEditingValueRef.current;
+      const update: Partial<Draft> = inlineEditingPart === "title"
+        ? { title: value }
+        : inlineEditingPart === "footer"
+          ? { footer: value }
+          : { message: value, messageOrigin: "direct" };
+      draftRef.current = { ...draftRef.current, ...update };
+      setDraft(update);
+      setInlineEditingPart(null);
     }
-  }, [card.name, cardImageUrl, downloading]);
+    setFinalizing(true);
+    try {
+      const { blob } = await createCardImage(useAi, useAi ? "sub" : undefined);
+      const cardId = await addCard(draftRef.current, blob);
+      if (destination) router.push(destination);
+      return cardId;
+    } catch {
+      window.alert("카드 완성에 실패했습니다.");
+      return null;
+    } finally {
+      setFinalizing(false);
+    }
+  }, [addCard, createCardImage, finalizing, inlineEditingPart, router, setDraft, useAi]);
+
+  const getTextAreaPoint = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: clampUnit((event.clientX - rect.left) / rect.width),
+      y: clampUnit((event.clientY - rect.top) / rect.height),
+    };
+  }, []);
+
+  const getPartTextBox = useCallback((source: Draft, part: PreviewTextPart) => {
+    if (part === "title") return source.titleTextBox ?? getDefaultPartTextBox("title", source.cardPosition, source);
+    if (part === "footer") return source.footerTextBox ?? getDefaultPartTextBox("footer", source.cardPosition, source);
+    return source.contentTextBox ?? source.textBox ?? getDefaultPartTextBox("content", source.cardPosition, source);
+  }, []);
+
+  const setPartTextBox = useCallback((part: PreviewTextPart, box: TextBox) => {
+    manuallyPositionedPartsRef.current.add(part);
+    if (part === "title") setDraft({ titleTextBox: box, cardPosition: "auto" });
+    else if (part === "footer") setDraft({ footerTextBox: box, cardPosition: "auto" });
+    else setDraft({ contentTextBox: box, textBox: box, cardPosition: "auto" });
+  }, [setDraft]);
+
+  const getPartRotation = useCallback((source: Draft, part: PreviewTextPart) => {
+    if (part === "title") return source.titleRotation ?? 0;
+    if (part === "footer") return source.footerRotation ?? 0;
+    return source.contentRotation ?? 0;
+  }, []);
+
+  const setPartRotation = useCallback((part: PreviewTextPart, rotation: number) => {
+    const normalized = Math.round(clampRange(rotation, -45, 45));
+    if (part === "title") setDraft({ titleRotation: normalized });
+    else if (part === "footer") setDraft({ footerRotation: normalized });
+    else setDraft({ contentRotation: normalized });
+  }, [setDraft]);
+
+  const adjustPartFontScale = useCallback((part: PreviewTextPart, delta: number) => {
+    const currentDraft = draftRef.current;
+    const typography = getRecommendedTypography(currentDraft);
+    const key = part === "title" ? "titleScale" : part === "footer" ? "footerScale" : "contentScale";
+    const fallback = part === "title" ? typography.titleScale : part === "footer" ? 1 : typography.contentScale;
+    const current = (currentDraft[key] as number | undefined) ?? fallback;
+    const nextScale = Math.round(clampRange(current + delta, 0.6, 1.8) * 20) / 20;
+    if (nextScale === current) return;
+
+    const boxes = {
+      title: getPartTextBox(currentDraft, "title"),
+      content: getPartTextBox(currentDraft, "content"),
+      footer: getPartTextBox(currentDraft, "footer"),
+    };
+    const selected = boxes[part];
+    const ratio = nextScale / current;
+    const widthRatio = Math.pow(ratio, 0.72);
+    const heightRatio = ratio;
+    const centerX = (selected.x0 + selected.x1) / 2;
+    const centerY = (selected.y0 + selected.y1) / 2;
+    const nextWidth = clampRange((selected.x1 - selected.x0) * widthRatio, part === "content" ? 0.24 : 0.18, 0.9);
+    const nextHeight = clampRange((selected.y1 - selected.y0) * heightRatio, 0.055, part === "content" ? 0.42 : 0.2);
+    boxes[part] = {
+      x0: clampRange(centerX - nextWidth / 2, 0.04, 0.96 - nextWidth),
+      y0: clampRange(centerY - nextHeight / 2, 0.04, 0.96 - nextHeight),
+      x1: 0,
+      y1: 0,
+    };
+    boxes[part].x1 = boxes[part].x0 + nextWidth;
+    boxes[part].y1 = boxes[part].y0 + nextHeight;
+
+    const gap = 0.025;
+    const hasTitle = Boolean(currentDraft.title?.trim());
+    const hasFooter = Boolean(currentDraft.footer?.trim() || (currentDraft.authorEnabled && currentDraft.author?.trim()));
+
+    if (part === "title" && hasTitle) {
+      const shift = boxes.title.y1 + gap - boxes.content.y0;
+      if (shift > 0) {
+        boxes.content = { ...boxes.content, y0: boxes.content.y0 + shift, y1: boxes.content.y1 + shift };
+        if (hasFooter) boxes.footer = { ...boxes.footer, y0: boxes.footer.y0 + shift, y1: boxes.footer.y1 + shift };
+      }
+    } else if (part === "content") {
+      if (hasTitle) {
+        const shift = boxes.title.y1 + gap - boxes.content.y0;
+        if (shift > 0) boxes.title = { ...boxes.title, y0: boxes.title.y0 - shift, y1: boxes.title.y1 - shift };
+      }
+      if (hasFooter) {
+        const shift = boxes.content.y1 + gap - boxes.footer.y0;
+        if (shift > 0) boxes.footer = { ...boxes.footer, y0: boxes.footer.y0 + shift, y1: boxes.footer.y1 + shift };
+      }
+    } else if (part === "footer" && hasFooter) {
+      const shift = boxes.content.y1 + gap - boxes.footer.y0;
+      if (shift > 0) {
+        boxes.content = { ...boxes.content, y0: boxes.content.y0 - shift, y1: boxes.content.y1 - shift };
+        if (hasTitle) boxes.title = { ...boxes.title, y0: boxes.title.y0 - shift, y1: boxes.title.y1 - shift };
+      }
+    }
+
+    const visibleBoxes = [
+      ...(hasTitle ? [boxes.title] : []),
+      boxes.content,
+      ...(hasFooter ? [boxes.footer] : []),
+    ];
+    const groupTop = Math.min(...visibleBoxes.map((box) => box.y0));
+    const groupBottom = Math.max(...visibleBoxes.map((box) => box.y1));
+    const groupShiftY = groupTop < 0.04 ? 0.04 - groupTop : groupBottom > 0.96 ? 0.96 - groupBottom : 0;
+    if (groupShiftY) {
+      (["title", "content", "footer"] as PreviewTextPart[]).forEach((boxPart) => {
+        boxes[boxPart] = {
+          ...boxes[boxPart],
+          y0: boxes[boxPart].y0 + groupShiftY,
+          y1: boxes[boxPart].y1 + groupShiftY,
+        };
+      });
+    }
+
+    manuallyPositionedPartsRef.current.add("title");
+    manuallyPositionedPartsRef.current.add("content");
+    manuallyPositionedPartsRef.current.add("footer");
+    setDraftWithUndo({
+      [key]: nextScale,
+      titleTextBox: boxes.title,
+      contentTextBox: boxes.content,
+      textBox: boxes.content,
+      footerTextBox: boxes.footer,
+    });
+  }, [getPartTextBox, setDraftWithUndo]);
+
+  const beginInlineEditing = useCallback((part: PreviewTextPart, caretPoint?: { clientX: number; clientY: number }) => {
+    setAdjTab(part);
+    setShowTextBoxes(true);
+    setSelectedTextBoxPart(part);
+    const currentDraft = draftRef.current;
+    const initialText = part === "title" ? currentDraft.title ?? ""
+      : part === "content" ? currentDraft.message ?? ""
+      : currentDraft.footer ?? "";
+    inlineEditingValueRef.current = initialText;
+    setInlineEditingInitialText(initialText);
+    setInlineEditingPart(part);
+    window.requestAnimationFrame(() => {
+      const editor = inlineEditorRef.current;
+      if (!editor) return;
+      editor.focus();
+      const selection = window.getSelection();
+      let range: Range | null = null;
+      if (caretPoint) {
+        const caretPosition = document.caretPositionFromPoint?.(caretPoint.clientX, caretPoint.clientY);
+        if (caretPosition && editor.contains(caretPosition.offsetNode)) {
+          range = document.createRange();
+          range.setStart(caretPosition.offsetNode, caretPosition.offset);
+          range.collapse(true);
+        } else {
+          const legacyDocument = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+          };
+          const legacyRange = legacyDocument.caretRangeFromPoint?.(caretPoint.clientX, caretPoint.clientY) ?? null;
+          if (legacyRange && editor.contains(legacyRange.startContainer)) range = legacyRange;
+        }
+      }
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+      }
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  }, []);
+
+  const endInlineEditing = useCallback(() => {
+    const part = inlineEditingPart;
+    const value = inlineEditingValueRef.current;
+    if (part === "title") setDraft({ title: value });
+    else if (part === "footer") setDraft({ footer: value });
+    else if (part === "content") setDraft({ message: value, messageOrigin: "direct" });
+    setInlineEditingPart(null);
+  }, [inlineEditingPart, setDraft]);
+
+  // 회전마크는 박스 우측 하단(se 코너)에 위치하며, 박스가 회전하면 마크도 중심 기준으로 함께 회전한다.
+  // 따라서 히트 판정도 회전을 반영한 마크의 실제 위치(픽셀 기준)로 계산해야 한다.
+  const isNearRotateHandle = useCallback((point: { x: number; y: number }, box: TextBox, rotation: number) => {
+    const W = CARD_PREVIEW_WIDTH;
+    const H = CARD_PREVIEW_HEIGHT;
+    const cx = ((box.x0 + box.x1) / 2) * W;
+    const cy = ((box.y0 + box.y1) / 2) * H;
+    const rad = (rotation * Math.PI) / 180;
+    const ox = box.x1 * W - cx;
+    const oy = box.y1 * H - cy;
+    const hx = ox * Math.cos(rad) - oy * Math.sin(rad) + cx;
+    const hy = ox * Math.sin(rad) + oy * Math.cos(rad) + cy;
+    return Math.hypot(point.x * W - hx, point.y * H - hy) <= 70;
+  }, []);
+
+  const getHorizontalResizeHandle = useCallback((
+    point: { x: number; y: number },
+    box: TextBox,
+    rotation: number,
+  ): "resize-left" | "resize-right" | null => {
+    const width = CARD_PREVIEW_WIDTH;
+    const height = CARD_PREVIEW_HEIGHT;
+    const cx = ((box.x0 + box.x1) / 2) * width;
+    const cy = ((box.y0 + box.y1) / 2) * height;
+    const rad = (rotation * Math.PI) / 180;
+    const rotatePoint = (x: number, y: number) => {
+      const ox = x - cx;
+      const oy = y - cy;
+      return {
+        x: ox * Math.cos(rad) - oy * Math.sin(rad) + cx,
+        y: ox * Math.sin(rad) + oy * Math.cos(rad) + cy,
+      };
+    };
+    const pointer = { x: point.x * width, y: point.y * height };
+    const left = rotatePoint(box.x0 * width, cy);
+    const right = rotatePoint(box.x1 * width, cy);
+    const threshold = 42;
+    if (Math.hypot(pointer.x - left.x, pointer.y - left.y) <= threshold) return "resize-left";
+    if (Math.hypot(pointer.x - right.x, pointer.y - right.y) <= threshold) return "resize-right";
+    return null;
+  }, []);
+
+  const getVerticalResizeHandle = useCallback((
+    point: { x: number; y: number },
+    box: TextBox,
+    rotation: number,
+  ): "resize-top" | "resize-bottom" | null => {
+    const width = CARD_PREVIEW_WIDTH;
+    const height = CARD_PREVIEW_HEIGHT;
+    const cx = ((box.x0 + box.x1) / 2) * width;
+    const cy = ((box.y0 + box.y1) / 2) * height;
+    const rad = (rotation * Math.PI) / 180;
+    const rotatePoint = (x: number, y: number) => {
+      const ox = x - cx;
+      const oy = y - cy;
+      return {
+        x: ox * Math.cos(rad) - oy * Math.sin(rad) + cx,
+        y: ox * Math.sin(rad) + oy * Math.cos(rad) + cy,
+      };
+    };
+    const pointer = { x: point.x * width, y: point.y * height };
+    const top = rotatePoint(cx, box.y0 * height);
+    const bottom = rotatePoint(cx, box.y1 * height);
+    const threshold = 42;
+    if (Math.hypot(pointer.x - top.x, pointer.y - top.y) <= threshold) return "resize-top";
+    if (Math.hypot(pointer.x - bottom.x, pointer.y - bottom.y) <= threshold) return "resize-bottom";
+    return null;
+  }, []);
+
+  const resetActiveTextBox = useCallback(() => {
+    pushUndoSnapshot();
+    setShowTextBoxes(true);
+    setSelectedTextBoxPart(adjTab);
+    manuallyPositionedPartsRef.current.delete(adjTab);
+    if (adjTab === "title") setDraft({ titleTextBox: undefined });
+    else if (adjTab === "footer") setDraft({ footerTextBox: undefined });
+    else setDraft({ contentTextBox: undefined, textBox: undefined });
+  }, [adjTab, pushUndoSnapshot, setDraft]);
+
+  const deleteTextPart = useCallback((part: "title" | "footer") => {
+    if (inlineEditingPart === part) endInlineEditing();
+    if (part === "title") {
+      manuallyPositionedPartsRef.current.delete("title");
+      setDraftWithUndo({
+        title: "",
+        titleTextBox: undefined,
+        titleRotation: undefined,
+      });
+      setAdjTab("content");
+      setSelectedTextBoxPart("content");
+      return;
+    }
+    manuallyPositionedPartsRef.current.delete("footer");
+    setDraftWithUndo({
+      footer: "",
+      author: "",
+      authorEnabled: false,
+      footerTextBox: undefined,
+      footerRotation: undefined,
+    });
+    setAdjTab("content");
+    setSelectedTextBoxPart("content");
+  }, [endInlineEditing, inlineEditingPart, setDraftWithUndo]);
+
+  const handleTextAreaPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (useAi) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = getTextAreaPoint(event);
+    const currentDraft = draftRef.current;
+    const selectedBox = selectedTextBoxPart ? getPartTextBox(currentDraft, selectedTextBoxPart) : null;
+    const selectedRotation = selectedTextBoxPart ? getPartRotation(currentDraft, selectedTextBoxPart) : 0;
+    const resizeMode = selectedTextBoxPart === "content" && selectedBox
+      ? getHorizontalResizeHandle(point, selectedBox, selectedRotation)
+      : null;
+    if (resizeMode && selectedBox) {
+      pushUndoSnapshot();
+      setShowTextBoxes(true);
+      areaDragStartRef.current = {
+        mode: resizeMode,
+        part: "content",
+        point,
+        box: selectedBox,
+      };
+      return;
+    }
+    const verticalResizeMode = selectedBox
+      ? getVerticalResizeHandle(point, selectedBox, selectedRotation)
+      : null;
+    if (verticalResizeMode && selectedBox && selectedTextBoxPart) {
+      pushUndoSnapshot();
+      setShowTextBoxes(true);
+      areaDragStartRef.current = {
+        mode: verticalResizeMode,
+        part: selectedTextBoxPart,
+        point,
+        box: selectedBox,
+      };
+      return;
+    }
+    if (selectedBox && isNearRotateHandle(point, selectedBox, selectedRotation)) {
+      pushUndoSnapshot();
+      setShowTextBoxes(true);
+      const cx = (selectedBox.x0 + selectedBox.x1) / 2;
+      const cy = (selectedBox.y0 + selectedBox.y1) / 2;
+      areaDragStartRef.current = {
+        mode: "rotate",
+        part: selectedTextBoxPart!,
+        point,
+        box: selectedBox,
+        startRotation: getPartRotation(currentDraft, selectedTextBoxPart!),
+        startPointerAngle: Math.atan2((point.y - cy) * CARD_PREVIEW_HEIGHT, (point.x - cx) * CARD_PREVIEW_WIDTH) * 180 / Math.PI,
+      };
+      return;
+    }
+    const hitOrder = selectedTextBoxPart
+      ? ([selectedTextBoxPart, ...(["title", "content", "footer"] as PreviewTextPart[]).filter((part) => part !== selectedTextBoxPart)] as PreviewTextPart[])
+      : (["title", "content", "footer"] as PreviewTextPart[]);
+    const hit = hitOrder
+      .map((part) => ({ part, box: getPartTextBox(currentDraft, part) }))
+      .find(({ box }) => point.x >= box.x0 && point.x <= box.x1 && point.y >= box.y0 && point.y <= box.y1);
+    if (!hit) {
+      if (inlineEditingPart) endInlineEditing();
+      setShowTextBoxes(false);
+      setSelectedTextBoxPart(null);
+      areaDragStartRef.current = null;
+      return;
+    }
+    pushUndoSnapshot();
+    setShowTextBoxes(true);
+    setSelectedTextBoxPart(hit.part);
+    const part = hit?.part ?? adjTab;
+    const box = hit?.box ?? getPartTextBox(currentDraft, part);
+    if (part !== adjTab) setAdjTab(part);
+    areaDragStartRef.current = { mode: "move", part, point, box };
+  }, [adjTab, endInlineEditing, getHorizontalResizeHandle, getPartRotation, getPartTextBox, getTextAreaPoint, getVerticalResizeHandle, inlineEditingPart, isNearRotateHandle, pushUndoSnapshot, selectedTextBoxPart, useAi]);
+
+  const handleTextAreaPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (useAi || !areaDragStartRef.current) return;
+    event.preventDefault();
+    const drag = areaDragStartRef.current;
+    const point = getTextAreaPoint(event);
+    if (drag.mode === "rotate" && drag.box) {
+      const cx = (drag.box.x0 + drag.box.x1) / 2;
+      const cy = (drag.box.y0 + drag.box.y1) / 2;
+      const currentAngle = Math.atan2((point.y - cy) * CARD_PREVIEW_HEIGHT, (point.x - cx) * CARD_PREVIEW_WIDTH) * 180 / Math.PI;
+      const delta = currentAngle - (drag.startPointerAngle ?? currentAngle);
+      setPartRotation(drag.part, (drag.startRotation ?? 0) + delta);
+      return;
+    }
+    if (drag.mode === "move" && drag.box) {
+      const dx = point.x - drag.point.x;
+      const dy = point.y - drag.point.y;
+      const width = drag.box.x1 - drag.box.x0;
+      const height = drag.box.y1 - drag.box.y0;
+      const x0 = clampUnit(Math.min(1 - width, Math.max(0, drag.box.x0 + dx)));
+      const y0 = clampUnit(Math.min(1 - height, Math.max(0, drag.box.y0 + dy)));
+      setPartTextBox(drag.part, { x0, y0, x1: x0 + width, y1: y0 + height });
+      return;
+    }
+    if ((drag.mode === "resize-left" || drag.mode === "resize-right") && drag.box) {
+      const minWidth = 0.24;
+      const nextBox = drag.mode === "resize-left"
+        ? { ...drag.box, x0: clampRange(point.x, 0, drag.box.x1 - minWidth) }
+        : { ...drag.box, x1: clampRange(point.x, drag.box.x0 + minWidth, 1) };
+      setPartTextBox(drag.part, nextBox);
+      return;
+    }
+    if ((drag.mode === "resize-top" || drag.mode === "resize-bottom") && drag.box) {
+      const minHeight = 0.055;
+      const nextBox = drag.mode === "resize-top"
+        ? { ...drag.box, y0: clampRange(point.y, 0, drag.box.y1 - minHeight) }
+        : { ...drag.box, y1: clampRange(point.y, drag.box.y0 + minHeight, 1) };
+      setPartTextBox(drag.part, nextBox);
+      return;
+    }
+    setPartTextBox(drag.part, normalizeTextBox(drag.point, point));
+  }, [getTextAreaPoint, setPartRotation, setPartTextBox, useAi]);
+
+  const handleTextAreaPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (useAi || !areaDragStartRef.current) return;
+    event.preventDefault();
+    const drag = areaDragStartRef.current;
+    const point = getTextAreaPoint(event);
+    const movedPx = Math.hypot(
+      (point.x - drag.point.x) * CARD_PREVIEW_WIDTH,
+      (point.y - drag.point.y) * CARD_PREVIEW_HEIGHT,
+    );
+    if (drag.mode === "rotate" && drag.box) {
+      const cx = (drag.box.x0 + drag.box.x1) / 2;
+      const cy = (drag.box.y0 + drag.box.y1) / 2;
+      const currentAngle = Math.atan2((point.y - cy) * CARD_PREVIEW_HEIGHT, (point.x - cx) * CARD_PREVIEW_WIDTH) * 180 / Math.PI;
+      const delta = currentAngle - (drag.startPointerAngle ?? currentAngle);
+      setPartRotation(drag.part, (drag.startRotation ?? 0) + delta);
+    } else if (drag.mode === "move" && drag.box) {
+      const dx = point.x - drag.point.x;
+      const dy = point.y - drag.point.y;
+      const width = drag.box.x1 - drag.box.x0;
+      const height = drag.box.y1 - drag.box.y0;
+      const x0 = clampUnit(Math.min(1 - width, Math.max(0, drag.box.x0 + dx)));
+      const y0 = clampUnit(Math.min(1 - height, Math.max(0, drag.box.y0 + dy)));
+      setPartTextBox(drag.part, { x0, y0, x1: x0 + width, y1: y0 + height });
+      if (movedPx < 6) void beginInlineEditing(drag.part);
+    } else if ((drag.mode === "resize-left" || drag.mode === "resize-right") && drag.box) {
+      const minWidth = 0.24;
+      const nextBox = drag.mode === "resize-left"
+        ? { ...drag.box, x0: clampRange(point.x, 0, drag.box.x1 - minWidth) }
+        : { ...drag.box, x1: clampRange(point.x, drag.box.x0 + minWidth, 1) };
+      setPartTextBox(drag.part, nextBox);
+    } else if ((drag.mode === "resize-top" || drag.mode === "resize-bottom") && drag.box) {
+      const minHeight = 0.055;
+      const nextBox = drag.mode === "resize-top"
+        ? { ...drag.box, y0: clampRange(point.y, 0, drag.box.y1 - minHeight) }
+        : { ...drag.box, y1: clampRange(point.y, drag.box.y0 + minHeight, 1) };
+      setPartTextBox(drag.part, nextBox);
+    } else {
+      setPartTextBox(drag.part, normalizeTextBox(drag.point, point));
+    }
+    areaDragStartRef.current = null;
+  }, [beginInlineEditing, getTextAreaPoint, setPartRotation, setPartTextBox, useAi]);
+
+  const focusTextEditor = useCallback((part: PreviewTextPart) => {
+    void beginInlineEditing(part);
+  }, [beginInlineEditing]);
+
+  const handlePreviewDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (useAi) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const point = {
+      x: clampUnit((event.clientX - rect.left) / rect.width),
+      y: clampUnit((event.clientY - rect.top) / rect.height),
+    };
+    const currentDraft = draftRef.current;
+    const hitOrder = selectedTextBoxPart
+      ? ([selectedTextBoxPart, ...(["title", "content", "footer"] as PreviewTextPart[]).filter((part) => part !== selectedTextBoxPart)] as PreviewTextPart[])
+      : (["title", "content", "footer"] as PreviewTextPart[]);
+    const hitPart = hitOrder.find((part) => {
+      const box = getPartTextBox(currentDraft, part);
+      return point.x >= box.x0 && point.x <= box.x1 && point.y >= box.y0 && point.y <= box.y1;
+    });
+    void beginInlineEditing(hitPart ?? selectedTextBoxPart ?? adjTab, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }, [adjTab, beginInlineEditing, getPartTextBox, selectedTextBoxPart, useAi]);
+
+  const handlePreviewKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (useAi || event.key !== "Enter") return;
+    event.preventDefault();
+    focusTextEditor(selectedTextBoxPart ?? adjTab);
+  }, [adjTab, focusTextEditor, selectedTextBoxPart, useAi]);
+
+  const hasCustomActiveTextBox =
+    adjTab === "title" ? Boolean(draft.titleTextBox)
+    : adjTab === "footer" ? Boolean(draft.footerTextBox)
+    : Boolean(draft.contentTextBox || draft.textBox);
+  const activeRotation = getPartRotation(draft, adjTab);
+  const overlayBoxes = getResolvedTextBoxes(draft);
+  const availableTextBox: TextBox = previewWsRegion
+    ? {
+        x0: clampRange(previewWsRegion.x0 - 0.035, 0.055, 0.72),
+        y0: clampRange(previewWsRegion.y0 - 0.035, 0.06, 0.72),
+        x1: clampRange(previewWsRegion.x1 + 0.035, 0.28, 0.945),
+        y1: clampRange(previewWsRegion.y1 + 0.035, 0.28, 0.94),
+      }
+    : { x0: 0.075, y0: 0.08, x1: 0.925, y1: 0.92 };
+  const previewTextBoxes = (["title", "content", "footer"] as PreviewTextPart[]).map((part) => ({
+    part,
+    box: part === "title" ? overlayBoxes.titleTextBox : part === "footer" ? overlayBoxes.footerTextBox : overlayBoxes.contentTextBox,
+    rotation: getPartRotation(draft, part),
+    label: part === "title" ? "TITLE" : part === "content" ? "BODY" : "FOOTER",
+  })).filter(({ part }) => {
+    if (part === "content") return true;
+    if (part === "title") return inlineEditingPart === part || Boolean(draft.title?.trim());
+    return inlineEditingPart === part || Boolean(draft.footer?.trim() || (draft.authorEnabled && draft.author?.trim()));
+  });
+
+  useEffect(() => {
+    if (!done || !cardPreviewRef.current || inlineEditingPart) return;
+    let cancelled = false;
+    const measure = async () => {
+      await document.fonts?.ready;
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      if (cancelled || !cardPreviewRef.current) return;
+      const previewRect = cardPreviewRef.current.getBoundingClientRect();
+      if (!previewRect.width || !previewRect.height) return;
+
+      const visibleParts = previewTextBoxes.map(({ part }) => part);
+      const measured = visibleParts.map((part) => {
+        const element = previewTextRefs.current[part];
+        if (!element) return null;
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const textRect = range.getBoundingClientRect();
+        const minWidth = part === "content" ? 0.26 : 0.2;
+        const maxWidth = part === "content" ? 0.82 : part === "footer" ? 0.62 : 0.7;
+        const minHeight = part === "content" ? 0.065 : 0.055;
+        const width = clampRange((textRect.width + 24) / previewRect.width, minWidth, maxWidth);
+        const height = clampRange((textRect.height + 18) / previewRect.height, minHeight, part === "content" ? 0.38 : 0.18);
+        return {
+          part,
+          width,
+          height,
+        };
+      }).filter((item): item is NonNullable<typeof item> => Boolean(item));
+      if (!measured.length) return;
+
+      const titleMetric = measured.find(({ part }) => part === "title");
+      const bodyMetric = measured.find(({ part }) => part === "content");
+      const footerMetric = measured.find(({ part }) => part === "footer");
+      if (!bodyMetric) return;
+      const totalHeight = bodyMetric.height + (titleMetric?.height ?? 0) + (footerMetric?.height ?? 0);
+      const availableCenterY = (availableTextBox.y0 + availableTextBox.y1) / 2;
+      const groupTop = clampRange(
+        availableCenterY - totalHeight / 2,
+        0.055,
+        Math.max(0.055, 0.945 - totalHeight),
+      );
+      const bodyY0 = groupTop + (titleMetric?.height ?? 0);
+      const bodyWidth = Math.min(bodyMetric.width, availableTextBox.x1 - availableTextBox.x0);
+      const bodyCenterX = clampRange(
+        previewWsRegion?.cx ?? (availableTextBox.x0 + availableTextBox.x1) / 2,
+        availableTextBox.x0 + bodyWidth / 2,
+        availableTextBox.x1 - bodyWidth / 2,
+      );
+      const bodyX0 = bodyCenterX - bodyWidth / 2;
+      const bodyBox: TextBox = {
+        x0: bodyX0,
+        y0: bodyY0,
+        x1: bodyX0 + bodyWidth,
+        y1: bodyY0 + bodyMetric.height,
+      };
+      const next: Partial<Draft> = {};
+
+      if (!manuallyPositionedPartsRef.current.has("content")) {
+        next.contentTextBox = bodyBox;
+        next.textBox = bodyBox;
+      }
+      if (titleMetric && !manuallyPositionedPartsRef.current.has("title")) {
+        const titleWidth = Math.min(titleMetric.width, availableTextBox.x1 - availableTextBox.x0);
+        const titleX0 = clampRange(bodyCenterX - titleWidth / 2, 0.055, 0.945 - titleWidth);
+        next.titleTextBox = {
+          x0: titleX0,
+          y0: bodyBox.y0 - titleMetric.height,
+          x1: titleX0 + titleWidth,
+          y1: bodyBox.y0,
+        };
+      }
+      if (footerMetric && !manuallyPositionedPartsRef.current.has("footer")) {
+        const footerWidth = Math.min(footerMetric.width, bodyBox.x1 - 0.055);
+        const footerX1 = bodyBox.x1;
+        next.footerTextBox = {
+          x0: footerX1 - footerWidth,
+          y0: bodyBox.y1,
+          x1: footerX1,
+          y1: bodyBox.y1 + footerMetric.height,
+        };
+      }
+
+      const changed = measured.some(({ part }) => {
+        if (manuallyPositionedPartsRef.current.has(part)) return false;
+        const before = getPartTextBox(draftRef.current, part);
+        const after = part === "title" ? next.titleTextBox : part === "footer" ? next.footerTextBox : next.contentTextBox;
+        return Boolean(after) && (
+          Math.abs(before.x0 - after!.x0) > 0.002
+          || Math.abs(before.y0 - after!.y0) > 0.002
+          || Math.abs(before.x1 - after!.x1) > 0.002
+          || Math.abs(before.y1 - after!.y1) > 0.002
+        );
+      });
+      if (changed && !cancelled) setDraft(next);
+    };
+    void measure();
+    return () => { cancelled = true; };
+  }, [
+    cardPreviewScale,
+    done,
+    draft.contentFont,
+    draft.contentScale,
+    draft.footer,
+    draft.footerFont,
+    draft.footerScale,
+    draft.message,
+    draft.title,
+    draft.titleFont,
+    draft.titleScale,
+    getPartTextBox,
+    inlineEditingPart,
+    previewWsRegion,
+    setDraft,
+  ]);
 
   if (!done) {
     const sparkles = ["✨", "💫", "🌸", "💌", "🌟", "✿"];
@@ -2617,9 +3696,304 @@ export function PreviewScreen() {
 
   return (
     <PhoneShell backHref="/home">
+      <LoadingOverlay
+        open={finalizing}
+        title="저장 중입니다"
+        description="카드를 완성해 보관함에 저장하고 있어요."
+      />
       {cardImageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={cardImageUrl} alt="완성된 마음카드" className="w-full rounded-2xl shadow-lg" />
+        <div
+          ref={cardPreviewRef}
+          className={`relative overflow-hidden rounded-2xl shadow-lg ${!useAi ? "cursor-move touch-none ring-2 ring-[#7b310d]/40" : ""}`}
+          tabIndex={useAi ? undefined : 0}
+          role={useAi ? undefined : "button"}
+          aria-label={useAi ? undefined : "카드 미리보기. 텍스트 박스를 더블클릭하거나 Enter를 누르면 문구를 수정할 수 있습니다."}
+          onPointerDown={handleTextAreaPointerDown}
+          onPointerMove={handleTextAreaPointerMove}
+          onPointerUp={handleTextAreaPointerUp}
+          onPointerCancel={() => { areaDragStartRef.current = null; }}
+          onDoubleClick={handlePreviewDoubleClick}
+          onKeyDown={handlePreviewKeyDown}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={cardImageUrl} alt="마음카드 배경" className="w-full select-none" draggable={false} />
+          {previewTextBoxes.map(({ part, box, rotation, label }) => {
+            const active = showTextBoxes && part === selectedTextBoxPart;
+            const typography = getRecommendedTypography(draft);
+            const inlineText = inlineEditingPart === part
+              ? inlineEditingInitialText
+              : part === "title" ? draft.title ?? "" : part === "content" ? draft.message ?? "" : draft.footer ?? "";
+            const inlineFontId = part === "title"
+              ? draft.titleFont ?? typography.titleFont
+              : part === "footer"
+                ? draft.footerFont ?? draft.contentFont ?? typography.contentFont
+                : draft.contentFont ?? typography.contentFont;
+            const inlineFontFamily = CARD_FONTS.find((font) => font.id === inlineFontId)?.family;
+            const fontKey = part === "title" ? "titleFont" : part === "footer" ? "footerFont" : "contentFont";
+            const colorKey = part === "title" ? "titleColor" : part === "footer" ? "footerColor" : "contentColor";
+            const inlineColor = part === "title"
+              ? draft.titleColor && draft.titleColor !== "auto" ? draft.titleColor : "#6f2f18"
+              : part === "footer"
+                ? draft.footerColor && draft.footerColor !== "auto"
+                  ? draft.footerColor
+                  : draft.contentColor && draft.contentColor !== "auto" ? draft.contentColor : "#4a2412"
+                : draft.contentColor && draft.contentColor !== "auto" ? draft.contentColor : "#4a2412";
+            const serverFontSize = getInlineFontSize(part, availableTextBox, draft);
+            const inlineFontSize = serverFontSize * cardPreviewScale;
+            const inlineTextShadow = "0 1px 3px rgba(255,255,255,.7), 0 1px 3px rgba(0,0,0,.35)";
+            const textStyle = {
+              color: inlineColor,
+              fontFamily: inlineFontFamily,
+              fontSize: `${inlineFontSize}px`,
+              fontWeight: 400,
+              boxSizing: "border-box" as const,
+              width: "100%",
+              height: "100%",
+              alignContent: "center",
+              lineHeight: part === "content" ? 1.36 : part === "footer" ? 1.4 : 1.18,
+              textAlign: "center" as const,
+              wordBreak: "keep-all" as const,
+              overflowWrap: "normal" as const,
+              padding: `${4 * cardPreviewScale}px ${8 * cardPreviewScale}px`,
+              textShadow: inlineTextShadow,
+            };
+            const colorClass =
+              part === "title"
+                ? active ? "border-[#7b310d] bg-[#7b310d]/15 ring-2 ring-white/90" : "border-[#d98238] bg-[#d98238]/10"
+                : part === "content"
+                  ? active ? "border-[#1f6f78] bg-[#1f6f78]/15 ring-2 ring-white/90" : "border-[#1f6f78] bg-[#1f6f78]/10"
+                  : active ? "border-[#6f3cc3] bg-[#6f3cc3]/15 ring-2 ring-white/90" : "border-[#6f3cc3] bg-[#6f3cc3]/10";
+            const labelClass =
+              part === "title"
+                ? active ? "bg-[#7b310d] text-white" : "bg-[#d98238] text-white"
+                : part === "content"
+                  ? active ? "bg-[#1f6f78] text-white" : "bg-[#1f6f78] text-white"
+                  : active ? "bg-[#6f3cc3] text-white" : "bg-[#6f3cc3] text-white";
+            const boxWidth = Math.max(0.08, box.x1 - box.x0);
+            const boxHeight = Math.max(0.08, box.y1 - box.y0);
+            const previewWidthPx = Math.max(320, CARD_PREVIEW_WIDTH * cardPreviewScale);
+            const previewHeightPx = Math.max(480, CARD_PREVIEW_HEIGHT * cardPreviewScale);
+            const quickToolWidthPx = Math.min(264, previewWidthPx - 16);
+            const quickToolHeightPx = 58;
+            const quickToolWidthRatio = quickToolWidthPx / previewWidthPx;
+            const quickToolHeightRatio = quickToolHeightPx / previewHeightPx;
+            const quickToolGapX = 8 / previewWidthPx;
+            const quickToolGapY = 8 / previewHeightPx;
+            const rightSpace = 1 - box.x1;
+            const leftSpace = box.x0;
+            const quickToolX = rightSpace >= quickToolWidthRatio + quickToolGapX
+              ? box.x1 + quickToolGapX
+              : leftSpace >= quickToolWidthRatio + quickToolGapX
+                ? box.x0 - quickToolWidthRatio - quickToolGapX
+                : clampRange(box.x0, quickToolGapX, 1 - quickToolWidthRatio - quickToolGapX);
+            const quickToolY = clampRange(
+              box.y0,
+              quickToolGapY,
+              1 - quickToolHeightRatio - quickToolGapY,
+            );
+            const quickToolLeftPercent = ((quickToolX - box.x0) / boxWidth) * 100;
+            const quickToolTopPercent = ((quickToolY - box.y0) / boxHeight) * 100;
+            return (
+              <div
+                key={part}
+                className={`absolute ${active ? `border-2 shadow-sm ${colorClass}` : ""}`}
+                style={{
+                  left: `${box.x0 * 100}%`,
+                  top: `${box.y0 * 100}%`,
+                  width: `${(box.x1 - box.x0) * 100}%`,
+                  height: `${(box.y1 - box.y0) * 100}%`,
+                  transform: `rotate(${rotation}deg)`,
+                  transformOrigin: "center",
+                  zIndex: active ? 3 : 2,
+                }}
+              >
+                {active && (
+                  <span className={`pointer-events-none absolute -left-0.5 -top-6 rounded px-2 py-0.5 text-[11px] font-black shadow-sm ${labelClass}`}>
+                    {label}
+                  </span>
+                )}
+                {active && (
+                  <div
+                    className="pointer-events-auto absolute z-30 flex items-center gap-2 rounded-2xl border-2 border-white bg-white/95 p-1.5 shadow-xl backdrop-blur"
+                    style={{
+                      left: `${quickToolLeftPercent}%`,
+                      top: `${quickToolTopPercent}%`,
+                      width: `${quickToolWidthPx}px`,
+                      transform: `rotate(${-rotation}deg)`,
+                      transformOrigin: "center",
+                    }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    <label
+                      className="relative grid h-11 w-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-white shadow-md transition hover:scale-105"
+                      title={`${label} 글자색`}
+                      style={{
+                        background: "conic-gradient(from 45deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #af52de, #ff2d55, #ff3b30)",
+                      }}
+                    >
+                      <input
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        aria-label={`${label} 직접 색상 선택`}
+                        type="color"
+                        value={inlineColor}
+                        onChange={(event) => {
+                          setDraftWithUndo({ [colorKey]: event.target.value });
+                        }}
+                      />
+                      <span
+                        className="pointer-events-none h-5 w-5 rounded-full border-[3px] border-white shadow-[0_1px_4px_rgba(0,0,0,0.45)]"
+                        style={{ backgroundColor: inlineColor }}
+                      />
+                    </label>
+                    <label className="relative flex h-11 min-w-0 flex-1 items-center rounded-xl border-2 border-stone-200 bg-white pl-3 shadow-sm">
+                      <Type size={18} className="pointer-events-none shrink-0 text-[#7b310d]" />
+                      <select
+                        aria-label={`${label} 글씨체 선택`}
+                        value={inlineFontId}
+                        onChange={(event) => {
+                          setDraftWithUndo({ [fontKey]: event.target.value });
+                        }}
+                        className="h-full min-w-0 flex-1 cursor-pointer appearance-none bg-transparent px-2 pr-7 text-base font-black text-stone-800 outline-none"
+                        style={{ fontFamily: inlineFontFamily }}
+                      >
+                        {CARD_FONTS.map((font) => (
+                          <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>
+                            {font.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={18} strokeWidth={3} className="pointer-events-none absolute right-2 text-[#7b310d]" />
+                    </label>
+                    <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-xl border-2 border-stone-200 bg-white shadow-sm">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          adjustPartFontScale(part, -0.05);
+                        }}
+                        className="grid h-full w-8 place-items-center text-lg font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
+                        aria-label={`${label} 글씨 작게`}
+                      >
+                        −
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          adjustPartFontScale(part, 0.05);
+                        }}
+                        className="grid h-full w-8 place-items-center border-l border-stone-200 text-lg font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
+                        aria-label={`${label} 글씨 크게`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {active && (part === "title" || part === "footer") && (
+                  <button
+                    type="button"
+                    aria-label={part === "title" ? "받는 사람 삭제" : "보내는 사람 삭제"}
+                    title="삭제"
+                    className="pointer-events-auto absolute -right-3 -top-3 z-20 grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-red-500 text-white shadow-md transition hover:bg-red-600 active:scale-95"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      deleteTextPart(part);
+                    }}
+                  >
+                    <X size={15} strokeWidth={3} />
+                  </button>
+                )}
+                <div
+                  className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+                >
+                  {inlineEditingPart === part ? (
+                  <div
+                      ref={(element) => {
+                        inlineEditorRef.current = element;
+                        if (element) previewTextRefs.current[part] = element;
+                        else delete previewTextRefs.current[part];
+                      }}
+                      contentEditable
+                      suppressContentEditableWarning
+                      role="textbox"
+                      aria-multiline="true"
+                      aria-label={part === "title" ? "받는 사람 바로 수정" : part === "content" ? "내용 문구 바로 수정" : "보내는 사람 바로 수정"}
+                      onInput={(event) => {
+                        const maxLength = part === "title" ? 20 : part === "footer" ? 40 : 500;
+                        const value = readEditableText(event.currentTarget).slice(0, maxLength);
+                        inlineEditingValueRef.current = value;
+                      }}
+                      onBlur={endInlineEditing}
+                      onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
+                          event.preventDefault();
+                          insertLineBreakAtCursor();
+                          inlineEditingValueRef.current = readEditableText(event.currentTarget);
+                          return;
+                        }
+                        if (
+                          event.key === "Escape"
+                          || (event.key === "Enter" && (event.ctrlKey || event.metaKey))
+                        ) {
+                          event.preventDefault();
+                          endInlineEditing();
+                        }
+                      }}
+                      className="pointer-events-auto overflow-y-auto whitespace-pre-wrap bg-white/10 text-center outline-none caret-current"
+                      style={textStyle}
+                    >
+                      {inlineText}
+                    </div>
+                  ) : (
+                    <div
+                      ref={(element) => {
+                        if (element) previewTextRefs.current[part] = element;
+                        else delete previewTextRefs.current[part];
+                      }}
+                      className="flex items-center justify-center whitespace-pre-wrap text-center"
+                      style={textStyle}
+                    >
+                      {inlineText}
+                    </div>
+                  )}
+                </div>
+                {active && (
+                  <>
+                    <span className="pointer-events-none absolute -top-3 left-1/2 h-6 w-10 -translate-x-1/2 rounded-full border-[3px] border-white bg-[#1f6f78] shadow-lg" />
+                    <span className="pointer-events-none absolute -bottom-3 left-1/2 h-6 w-10 -translate-x-1/2 rounded-full border-[3px] border-white bg-[#1f6f78] shadow-lg" />
+                    {part === "content" && (
+                      <>
+                        <span className="pointer-events-none absolute -left-3 top-1/2 h-10 w-6 -translate-y-1/2 rounded-full border-[3px] border-white bg-[#1f6f78] shadow-lg" />
+                        <span className="pointer-events-none absolute -right-3 top-1/2 h-10 w-6 -translate-y-1/2 rounded-full border-[3px] border-white bg-[#1f6f78] shadow-lg" />
+                      </>
+                    )}
+                    {/* 회전마크 — 박스 우측 하단(se). 잡고 돌려서 회전. */}
+                    <span className="absolute -bottom-6 -right-6 grid h-12 w-12 place-items-center rounded-full border-[3px] border-white bg-[#1f6f78] text-white shadow-lg">
+                      <RotateCcw size={18} />
+                    </span>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {!useAi && (
+            <div className="pointer-events-none absolute inset-x-3 top-3 rounded-xl bg-white/85 px-3 py-2 text-center text-[11px] font-bold text-[#7b310d] shadow-sm backdrop-blur">
+              BODY 좌우 손잡이로 가로 길이 조절 · 박스 드래그로 이동 · −/+로 글자 크기 조절
+            </div>
+          )}
+        </div>
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-10 text-center">
           <p className="font-bold text-red-700">{generationError ?? "AI 감성 합성 이미지가 아직 생성되지 않았습니다."}</p>
@@ -2631,50 +4005,227 @@ export function PreviewScreen() {
           {/* 폰트 미리보기용 @font-face (각 글씨체를 실제 모양으로 표시) */}
           <style>{CARD_FONTS.map((f) => `@font-face{font-family:'${f.family}';src:url('/fonts/${f.file}') format('truetype');font-display:swap;}`).join("")}</style>
 
+          <button
+            type="button"
+            onClick={() => setIsDetailPanelOpen((open) => !open)}
+            className="flex h-14 w-full items-center justify-between bg-white px-4 text-left transition hover:bg-stone-50 active:bg-stone-100"
+            aria-expanded={isDetailPanelOpen}
+            aria-controls="card-detail-editor"
+          >
+            <span>
+              <span className="block text-sm font-black text-stone-800">상세 글씨 편집</span>
+              <span className="mt-0.5 block text-xs font-semibold text-stone-400">
+                폰트 · 색상 · 크기 · 배치
+              </span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="rounded-full bg-[#7b310d]/10 px-2.5 py-1 text-[11px] font-black text-[#7b310d]">
+                {isDetailPanelOpen ? "접기" : "펼치기"}
+              </span>
+              <ChevronDown
+                size={22}
+                strokeWidth={3}
+                className={`text-[#7b310d] transition-transform duration-300 ${isDetailPanelOpen ? "rotate-180" : ""}`}
+              />
+            </span>
+          </button>
+
+          <div
+            id="card-detail-editor"
+            className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+              isDetailPanelOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+            }`}
+          >
+            <div className="min-h-0 overflow-hidden border-t border-stone-100">
           {/* 책갈피 탭 (최상단) — 제목/내용 각각 독립 편집 */}
-          <div className="flex items-end gap-1.5 bg-stone-100 px-3 pt-2.5">
-            {([["title", "제목", "Aa"], ["content", "내용", "¶"]] as const).map(([id, label, icon]) => {
+          <div className="sticky top-0 z-20 grid grid-cols-3 gap-1.5 border-b border-stone-100 bg-white/95 px-3 py-2.5 backdrop-blur">
+            {([["title", "받는 사람", "Aa"], ["content", "내용", "¶"]] as const).map(([id, label, icon]) => {
               const active = adjTab === id;
               return (
                 <button
                   key={id}
-                  onClick={() => setAdjTab(id)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-xl px-4 text-sm font-black transition ${active ? "bg-white py-3 text-[#7b310d] shadow-[0_-2px_6px_rgba(120,49,13,0.07)]" : "bg-stone-200/60 py-2.5 text-stone-400 hover:bg-stone-200"}`}
+                  onClick={() => {
+                    setAdjTab(id);
+                    setShowTextBoxes(true);
+                    setSelectedTextBoxPart(id);
+                  }}
+                  className={`flex h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-black transition ${active ? "bg-[#7b310d] text-white shadow-sm" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
                 >
                   <span className="text-base">{icon}</span>
                   {label}
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => {
+                setAdjTab("footer");
+                setShowTextBoxes(true);
+                setSelectedTextBoxPart("footer");
+              }}
+              className={`flex h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-black transition ${adjTab === "footer" ? "bg-[#7b310d] text-white shadow-sm" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
+            >
+              <span className="text-base">—</span>
+              보내는 사람
+            </button>
+          </div>
+
+          <div className="border-b border-stone-100 bg-white px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-stone-50 px-3 py-2">
+              <span className="text-xs font-black text-stone-600">
+                선택: {adjTab === "title" ? "TITLE" : adjTab === "content" ? "BODY" : "FOOTER"}
+              </span>
+              <span className="text-[11px] font-bold text-stone-400">
+                이동 · 크기 · 회전 조정
+              </span>
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTextBoxes(true);
+                  manuallyPositionedPartsRef.current.clear();
+                  setDraftWithUndo({
+                    ...getRecommendedTypography(draft),
+                    ...getDefaultPartTextBoxes(draft.cardPosition, draft),
+                    titleRotation: undefined,
+                    contentRotation: undefined,
+                    footerRotation: undefined,
+                  });
+                }}
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#7b310d]/20 bg-orange-50 text-sm font-black text-[#7b310d] transition hover:bg-orange-100 active:scale-[0.98]"
+              >
+                <Sparkles size={16} />
+                추천 적용
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={!hasCustomActiveTextBox}
+                onClick={resetActiveTextBox}
+                className="h-9 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-500 transition hover:bg-stone-50 disabled:opacity-40"
+              >
+                영역 초기화
+              </button>
+              <button
+                type="button"
+                disabled={activeRotation === 0}
+                onClick={() => {
+                  pushUndoSnapshot();
+                  setShowTextBoxes(true);
+                  setSelectedTextBoxPart(adjTab);
+                  setPartRotation(adjTab, 0);
+                }}
+                className="h-9 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-500 transition hover:bg-stone-50 disabled:opacity-40"
+              >
+                회전 초기화
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTextBoxes(false);
+                  setSelectedTextBoxPart(null);
+                }}
+                className="h-9 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-500 transition hover:bg-stone-50"
+              >
+                박스 숨김
+              </button>
+            </div>
           </div>
 
           {(() => {
-            const isTitle = adjTab === "title";
-            const fontKey = isTitle ? "titleFont" : "contentFont";
-            const colorKey = isTitle ? "titleColor" : "contentColor";
-            const scaleKey = isTitle ? "titleScale" : "contentScale";
-            const fontVal = (isTitle ? draft.titleFont : draft.contentFont) ?? "pen";
-            const colorVal = (isTitle ? draft.titleColor : draft.contentColor) ?? "auto";
-            const scaleVal = (draft[scaleKey] as number | undefined) ?? 1;
-            const sampleText = isTitle ? (draft.title?.trim() || "제목 미리보기") : (draft.message?.trim()?.slice(0, 8) || "내용 미리보기");
+            const editPart = showTextBoxes && selectedTextBoxPart ? selectedTextBoxPart : "content";
+            const isTitle = editPart === "title";
+            const isFooter = editPart === "footer";
+            const fontKey = isTitle ? "titleFont" : isFooter ? "footerFont" : "contentFont";
+            const colorKey = isTitle ? "titleColor" : isFooter ? "footerColor" : "contentColor";
+            const scaleKey = isTitle ? "titleScale" : isFooter ? "footerScale" : "contentScale";
+            const typography = getRecommendedTypography(draft);
+            const fontVal = (
+              isTitle ? draft.titleFont
+                : isFooter ? draft.footerFont ?? draft.contentFont
+                  : draft.contentFont
+            ) ?? (isTitle ? typography.titleFont : typography.contentFont);
+            const colorVal = (
+              isTitle ? draft.titleColor
+                : isFooter ? draft.footerColor
+                  : draft.contentColor
+            ) ?? "auto";
+            const scaleVal = (draft[scaleKey] as number | undefined) ?? (isTitle ? typography.titleScale : isFooter ? 1 : typography.contentScale);
+            const sampleText = isTitle
+              ? (draft.title?.trim() || "받는 사람")
+              : isFooter
+                ? (draft.footer?.trim()?.slice(0, 10) || "보내는 사람")
+                : (draft.message?.trim()?.slice(0, 10) || "내용 미리보기");
             return (
               <div className="space-y-4 p-4">
                 {/* 문구 수정 */}
-                <div>
-                  <label className="text-xs font-bold text-stone-500">{isTitle ? "제목 문구" : "내용 문구"}</label>
+                <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-500">
+                      {isTitle ? "받는 사람" : isFooter ? "보내는 사람" : "내용 문구"}
+                    </label>
+                    {(isTitle || isFooter) && (
+                      <button
+                        type="button"
+                        onClick={() => deleteTextPart(isTitle ? "title" : "footer")}
+                        disabled={isTitle ? !draft.title?.trim() : !draft.footer?.trim() && !draft.author?.trim()}
+                        className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-red-500 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-30"
+                        aria-label={`${isTitle ? "받는 사람" : "보내는 사람"} 삭제`}
+                      >
+                        <Trash2 size={13} />
+                        삭제
+                      </button>
+                    )}
+                  </div>
                   {isTitle ? (
                     <input
                       type="text"
                       value={draft.title ?? ""}
-                      onChange={(e) => setDraft({ title: e.target.value })}
+                      onChange={(e) => {
+                        const nextTitle = e.target.value;
+                        const typography = getRecommendedTypography({ ...draft, title: nextTitle });
+                        setDraftWithUndo({
+                          title: nextTitle,
+                          titleFont: typography.titleFont,
+                          titleScale: typography.titleScale,
+                        });
+                      }}
                       placeholder="제목 (비우면 내용만 표시)"
                       maxLength={20}
                       className="mt-1.5 h-11 w-full rounded-xl border border-stone-200 px-3.5 text-sm outline-none focus:border-[#7b310d]"
                     />
+                  ) : isFooter ? (
+                    <input
+                      type="text"
+                      value={draft.footer ?? ""}
+                      onChange={(e) => {
+                        const nextFooter = e.target.value;
+                        setDraftWithUndo({
+                          footer: nextFooter,
+                        });
+                      }}
+                      placeholder="예: 사랑하는 딸 지은이가"
+                      maxLength={40}
+                      className="mt-1.5 h-11 w-full rounded-xl border border-stone-200 px-3.5 text-sm outline-none transition focus:border-[#7b310d] focus:ring-2 focus:ring-[#7b310d]/10"
+                    />
                   ) : (
                     <textarea
                       value={draft.message ?? ""}
-                      onChange={(e) => setDraft({ message: e.target.value })}
+                      onChange={(e) => {
+                        const nextMessage = e.target.value;
+                        const typography = getRecommendedTypography({ ...draft, message: nextMessage });
+                        setDraftWithUndo({
+                          message: nextMessage,
+                          messageOrigin: "direct",
+                          contentRotation: undefined,
+                          titleFont: typography.titleFont,
+                          contentFont: typography.contentFont,
+                          titleScale: typography.titleScale,
+                          contentScale: typography.contentScale,
+                        });
+                      }}
                       placeholder="내용을 입력하세요"
                       rows={3}
                       className="mt-1.5 w-full rounded-xl border border-stone-200 px-3.5 py-2.5 text-sm leading-6 outline-none focus:border-[#7b310d]"
@@ -2683,12 +4234,11 @@ export function PreviewScreen() {
                 </div>
 
                 {/* 글씨체 — 각 폰트를 실제 글씨체로 보여주는 세로 리스트 */}
-                <div>
+                <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-stone-500">글씨체 <span className="font-normal text-stone-400">({CARD_FONTS.length}종)</span></label>
-                    {adjusting && <span className="text-[11px] font-semibold text-[#7b310d]">적용 중...</span>}
                   </div>
-                  <div className="mt-1.5 max-h-60 overflow-y-auto rounded-xl border border-stone-200">
+                  <div className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-stone-200 bg-stone-50/50">
                     {(["손글씨", "명조", "고딕", "디자인"] as const).map((group) => (
                       <div key={group}>
                         <div className="sticky top-0 z-10 bg-stone-50 px-3 py-1 text-[10px] font-bold tracking-wide text-stone-400">{group}</div>
@@ -2697,7 +4247,11 @@ export function PreviewScreen() {
                           return (
                             <button
                               key={f.id}
-                              onClick={() => setDraft({ [fontKey]: f.id })}
+                              onClick={() => {
+                                setShowTextBoxes(true);
+                                setSelectedTextBoxPart(editPart);
+                                setDraftWithUndo({ [fontKey]: f.id });
+                              }}
                               className={`flex w-full items-center justify-between gap-3 border-b border-stone-50 px-3 py-2 text-left transition ${active ? "bg-orange-50" : "hover:bg-stone-50"}`}
                             >
                               <span className="min-w-0 flex-1 truncate text-2xl leading-tight text-stone-800" style={{ fontFamily: f.family }}>
@@ -2716,11 +4270,20 @@ export function PreviewScreen() {
                 </div>
 
                 {/* 색 */}
-                <div>
-                  <label className="text-xs font-bold text-stone-500">글자색</label>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-500">글자색</label>
+                    <span className="font-mono text-[10px] font-bold uppercase text-stone-400">
+                      {colorVal === "auto" ? "배경 자동 맞춤" : colorVal}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => setDraft({ [colorKey]: "auto" })}
+                      onClick={() => {
+                        setShowTextBoxes(true);
+                        setSelectedTextBoxPart(editPart);
+                        setDraftWithUndo({ [colorKey]: "auto" });
+                      }}
                       className={`h-9 rounded-lg border px-3 text-xs font-bold transition ${colorVal === "auto" ? "border-[#7b310d] bg-[#7b310d] text-white" : "border-stone-200 bg-white text-stone-600"}`}
                     >
                       자동
@@ -2728,17 +4291,41 @@ export function PreviewScreen() {
                     {(["#3b1f10", "#000000", "#fdf6ec", "#7b310d", "#d6336c", "#c2410c", "#1e3a5f", "#2f6b4f", "#6f3cc3"]).map((c) => (
                       <button
                         key={c}
-                        onClick={() => setDraft({ [colorKey]: c })}
+                        onClick={() => {
+                          setShowTextBoxes(true);
+                          setSelectedTextBoxPart(editPart);
+                          setDraftWithUndo({ [colorKey]: c });
+                        }}
                         aria-label={c}
-                        className={`h-9 w-9 rounded-full border-2 transition ${colorVal === c ? "border-[#7b310d] ring-2 ring-[#7b310d]/40" : "border-white shadow"}`}
+                        className={`h-9 w-9 rounded-full border-2 transition hover:scale-110 ${colorVal === c ? "border-[#7b310d] ring-2 ring-[#7b310d]/30" : "border-white shadow"}`}
                         style={{ backgroundColor: c }}
                       />
                     ))}
+                    <label
+                      className="relative grid h-9 w-9 cursor-pointer place-items-center overflow-hidden rounded-full border-2 border-white shadow transition hover:scale-110"
+                      title="직접 색상 선택"
+                      style={{
+                        background: "conic-gradient(#ef4444, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444)",
+                      }}
+                    >
+                      <input
+                        type="color"
+                        value={colorVal === "auto" ? "#4a2412" : colorVal}
+                        onChange={(event) => {
+                          setShowTextBoxes(true);
+                          setSelectedTextBoxPart(editPart);
+                          setDraftWithUndo({ [colorKey]: event.target.value });
+                        }}
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        aria-label="직접 색상 선택"
+                      />
+                      <span className="h-3 w-3 rounded-full border border-white bg-white shadow" />
+                    </label>
                   </div>
                 </div>
 
                 {/* 크기 슬라이더 */}
-                <div>
+                <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-stone-500">글씨 크기</label>
                     <span className="text-xs font-bold text-[#7b310d]">{Math.round(scaleVal * 100)}%</span>
@@ -2749,7 +4336,14 @@ export function PreviewScreen() {
                     max={180}
                     step={5}
                     value={Math.round(scaleVal * 100)}
-                    onChange={(e) => setDraft({ [scaleKey]: Number(e.target.value) / 100 })}
+                    onChange={(e) => {
+                      const nextScale = Number(e.target.value) / 100;
+                      setShowTextBoxes(true);
+                      setSelectedTextBoxPart(editPart);
+                      setDraftWithUndo({
+                        [scaleKey]: nextScale,
+                      });
+                    }}
                     className="mt-2 h-2 w-full accent-[#7b310d]"
                   />
                 </div>
@@ -2761,7 +4355,18 @@ export function PreviewScreen() {
                     {([["auto", "자동"], ["top", "위"], ["center", "가운데"], ["bottom", "아래"]] as const).map(([id, label]) => (
                       <button
                         key={id}
-                        onClick={() => setDraft({ cardPosition: id })}
+                        onClick={() => {
+                          setShowTextBoxes(true);
+                          manuallyPositionedPartsRef.current.clear();
+                          setDraftWithUndo({
+                            cardPosition: id,
+                            textBox: undefined,
+                            ...getDefaultPartTextBoxes(id, draft),
+                            titleRotation: undefined,
+                            contentRotation: undefined,
+                            footerRotation: undefined,
+                          });
+                        }}
                         className={`h-9 rounded-lg border text-xs font-bold transition ${(draft.cardPosition ?? "auto") === id ? "border-[#7b310d] bg-orange-50 text-[#7b310d]" : "border-stone-200 bg-white text-stone-500"}`}
                       >
                         {label}
@@ -2772,29 +4377,40 @@ export function PreviewScreen() {
               </div>
             );
           })()}
+            </div>
+          </div>
         </div>
       )}
 
       <div className="mt-5 space-y-3">
         <button
-          onClick={() => setShareOpen(true)}
-          className="flex h-12 w-full items-center justify-center rounded-md bg-[#fee500] font-black text-stone-950"
+          type="button"
+          onClick={() => void finalizeCard("/library")}
+          disabled={finalizing}
+          className="flex h-[52px] w-full items-center justify-center gap-2 rounded-md bg-[#7b310d] font-black text-white disabled:opacity-50"
         >
-          공유하기
+          <Check size={19} /> {finalizing ? "완성 이미지 저장 중..." : "완성후 보관함저장"}
         </button>
         <button
-          onClick={downloadCard}
-          disabled={downloading}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-md border border-stone-200 font-bold disabled:opacity-50"
+          type="button"
+          onClick={() => {
+            setDraft({
+              titleRotation: undefined,
+              contentRotation: undefined,
+              footerRotation: undefined,
+              titleTextBox: undefined,
+              contentTextBox: undefined,
+              footerTextBox: undefined,
+              textBox: undefined,
+            });
+            router.push("/create/background");
+          }}
+          disabled={finalizing}
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-stone-200 bg-white text-sm font-bold text-stone-500 disabled:opacity-50"
         >
-          <Download size={18} /> {downloading ? "저장 중..." : "이미지 저장"}
+          <RotateCcw size={17} /> 다시 만들기
         </button>
-        <div className="grid grid-cols-2 gap-3">
-          <SecondaryLink href="/create/background"><RotateCcw size={18} /> 다시 만들기</SecondaryLink>
-          <SecondaryLink href="/library"><Folder size={18} /> 보관함 저장</SecondaryLink>
-        </div>
       </div>
-      {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} card={card} cardId={savedCardId} draft={draft} />}
 
       {/* 디버그 패널 */}
       {debugPrompt && (
@@ -2900,21 +4516,25 @@ function ShareSheet({
 
 export function LibraryScreen() {
   const { cards, loading, toggleFav, hideCard, deleteCard, deleteAll } = useSupabaseCards();
+  const { isSaved: isMessageSaved, toggle: toggleSavedMessage } = useFavMessages();
   const uiSettings = usePublicUiSettings();
-  const [, setDraft] = useDraft();
-  const router = useRouter();
   const [tab, setTab] = useState("전체");
   const [editMode, setEditMode] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [confirmSelected, setConfirmSelected] = useState(false);
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [expandedCard, setExpandedCard] = useState<CardItem | null>(null);
   const [msgExpanded, setMsgExpanded] = useState(false);
+  const [savingMessage, setSavingMessage] = useState(false);
 
   const displayed = cards.filter((card) => !hiddenIds.includes(card.id) && (tab !== "즐겨찾기" || card.favorite));
 
   const handleDelete = (cardId: string) => {
     deleteCard(cardId);
+    setSelectedIds((prev) => prev.filter((id) => id !== cardId));
     setConfirmId(null);
   };
 
@@ -2922,47 +4542,122 @@ export function LibraryScreen() {
     await deleteAll();
     setConfirmAll(false);
     setEditMode(false);
+    setSelectedIds([]);
   };
 
-  const handleEdit = (card: CardItem) => {
-    setDraft({
-      purpose: card.purpose,
-      name: card.name,
-      message: card.message,
-      bg: card.bg,
+  const toggleSelected = (cardId: string) => {
+    setSelectedIds((prev) => (
+      prev.includes(cardId) ? prev.filter((id) => id !== cardId) : [...prev, cardId]
+    ));
+    setConfirmSelected(false);
+  };
+
+  const allDisplayedSelected = displayed.length > 0 && displayed.every((card) => selectedIds.includes(card.id));
+
+  const toggleSelectAll = () => {
+    const displayedIds = displayed.map((card) => card.id);
+    setSelectedIds((prev) => {
+      if (allDisplayedSelected) return prev.filter((id) => !displayedIds.includes(id));
+      return Array.from(new Set([...prev, ...displayedIds]));
     });
-    router.push("/create/message");
+    setConfirmSelected(false);
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0 || deletingSelected) return;
+    setDeletingSelected(true);
+    try {
+      await Promise.all(selectedIds.map((cardId) => deleteCard(cardId)));
+      setSelectedIds([]);
+      setConfirmSelected(false);
+    } finally {
+      setDeletingSelected(false);
+    }
   };
 
   const handleHide = (cardId: string) => {
     hideCard(cardId);
     setHiddenIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId]);
+    setSelectedIds((prev) => prev.filter((id) => id !== cardId));
     setConfirmId(null);
   };
 
   return (
     <PhoneShell>
+      <LoadingOverlay
+        open={deletingSelected}
+        title="삭제 중입니다"
+        description={`선택한 카드 ${selectedIds.length}개를 삭제하고 있어요.`}
+      />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-black">내가 만든 카드</h1>
-        <button
-          onClick={() => { setEditMode((v) => !v); setConfirmId(null); setConfirmAll(false); }}
-          className={`text-sm font-bold ${editMode ? "text-[#7b310d]" : "text-stone-500"}`}
-        >
-          {editMode ? "완료" : "편집"}
-        </button>
-      </div>
-      {editMode && cards.length > 0 && (
-        confirmAll ? (
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
-            <span className="flex-1 text-xs font-bold text-red-700">카드 {cards.length}개를 모두 삭제할까요?</span>
-            <button onClick={handleDeleteAll} className="rounded-md bg-red-500 px-3 py-1 text-xs font-bold text-white">삭제</button>
-            <button onClick={() => setConfirmAll(false)} className="rounded-md bg-stone-200 px-3 py-1 text-xs font-bold text-stone-600">취소</button>
-          </div>
-        ) : (
-          <button onClick={() => setConfirmAll(true)} className="mt-3 w-full rounded-xl border border-red-200 bg-red-50 py-2 text-xs font-bold text-red-500">
-            전체 삭제
+        <div className="flex items-center gap-3">
+          {cards.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmAll(true);
+                setConfirmId(null);
+                setConfirmSelected(false);
+              }}
+              className="text-sm font-bold text-red-500"
+            >
+              전체 삭제
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setEditMode((v) => !v);
+              setConfirmId(null);
+              setConfirmSelected(false);
+              setSelectedIds([]);
+            }}
+            className={`text-sm font-bold ${editMode ? "text-[#7b310d]" : "text-stone-500"}`}
+          >
+            {editMode ? "완료" : "편집"}
           </button>
-        )
+        </div>
+      </div>
+      {confirmAll && cards.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+          <span className="flex-1 text-xs font-bold text-red-700">카드 {cards.length}개를 모두 삭제할까요?</span>
+          <button onClick={handleDeleteAll} className="rounded-md bg-red-500 px-3 py-1 text-xs font-bold text-white">삭제</button>
+          <button onClick={() => setConfirmAll(false)} className="rounded-md bg-stone-200 px-3 py-1 text-xs font-bold text-stone-600">취소</button>
+        </div>
+      )}
+      {editMode && cards.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="h-9 flex-1 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-600"
+            >
+              {allDisplayedSelected ? "전체 선택 해제" : `현재 목록 전체 선택 (${displayed.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmSelected(true)}
+              disabled={selectedIds.length === 0}
+              className="h-9 flex-1 rounded-xl bg-red-500 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400"
+            >
+              선택 삭제 ({selectedIds.length})
+            </button>
+          </div>
+          {confirmSelected && selectedIds.length > 0 && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+              <span className="flex-1 text-xs font-bold text-red-700">선택한 카드 {selectedIds.length}개를 삭제할까요?</span>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deletingSelected}
+                className="rounded-md bg-red-500 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {deletingSelected ? "삭제 중..." : "삭제"}
+              </button>
+              <button onClick={() => setConfirmSelected(false)} className="rounded-md bg-stone-200 px-3 py-1 text-xs font-bold text-stone-600">취소</button>
+            </div>
+          )}
+        </div>
       )}
       <div className="mt-5 grid grid-cols-3 gap-2 rounded-md bg-stone-100 p-1">
         {["전체", "즐겨찾기", "공유한 카드"].map((item) => (
@@ -2976,32 +4671,48 @@ export function LibraryScreen() {
       )}
       <div className="mt-5 grid grid-cols-2 gap-3">
         {displayed.map((card) => (
-          <article key={card.id} className="relative rounded-lg border border-stone-200 bg-white p-2">
+          <article
+            key={card.id}
+            className={`relative rounded-lg border bg-white p-2 transition ${
+              selectedIds.includes(card.id) ? "border-[#7b310d] ring-2 ring-[#7b310d]/25" : "border-stone-200"
+            }`}
+          >
             {editMode && (
-              <div className="absolute right-2 top-2 z-10 flex gap-1">
+              <>
                 <button
-                  onClick={() => handleHide(card.id)}
-                  className="grid h-7 w-7 place-items-center rounded-full bg-white/90 text-stone-600 shadow"
-                  aria-label="숨김"
+                  type="button"
+                  onClick={() => toggleSelected(card.id)}
+                  className={`absolute left-2 top-2 z-10 grid h-7 w-7 place-items-center rounded-full border-2 shadow ${
+                    selectedIds.includes(card.id) ? "border-[#7b310d] bg-[#7b310d] text-white" : "border-white bg-white/90 text-transparent"
+                  }`}
+                  aria-label={selectedIds.includes(card.id) ? "선택 해제" : "카드 선택"}
                 >
-                  <EyeOff size={13} />
+                  <Check size={15} strokeWidth={3} />
                 </button>
-                <button
-                  onClick={() => handleEdit(card)}
-                  className="grid h-7 w-7 place-items-center rounded-full bg-white/90 text-[#7b310d] shadow"
-                  aria-label="수정"
-                >
-                  <Pencil size={13} />
-                </button>
-                <button
-                  onClick={() => setConfirmId(confirmId === card.id ? null : card.id)}
-                  className="grid h-7 w-7 place-items-center rounded-full bg-red-500 text-white shadow"
-                  aria-label="삭제"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
+                <div className="absolute right-2 top-2 z-10 flex gap-1">
+                  <button
+                    onClick={() => handleHide(card.id)}
+                    className="grid h-7 w-7 place-items-center rounded-full bg-white/90 text-stone-600 shadow"
+                    aria-label="숨김"
+                  >
+                    <EyeOff size={13} />
+                  </button>
+                </div>
+              </>
             )}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setConfirmId(confirmId === card.id ? null : card.id);
+              }}
+              className={`absolute z-10 grid h-8 w-8 place-items-center rounded-full bg-red-500 text-white shadow transition hover:bg-red-600 ${
+                editMode ? "right-2 top-11" : "right-2 top-2"
+              }`}
+              aria-label={`${card.name} 카드 삭제`}
+            >
+              <Trash2 size={14} />
+            </button>
             {confirmId === card.id && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/60 p-3">
                 <p className="text-center text-xs font-bold text-white">삭제할까요?</p>
@@ -3021,7 +4732,13 @@ export function LibraryScreen() {
             )}
             <button
               type="button"
-              onClick={() => { if (!editMode) { setExpandedCard(card); setMsgExpanded(false); } }}
+              onClick={() => {
+                if (editMode) toggleSelected(card.id);
+                else {
+                  setExpandedCard(card);
+                  setMsgExpanded(false);
+                }
+              }}
               className="block w-full text-left"
               aria-label={`${card.name} 카드 확대`}
             >
@@ -3069,16 +4786,38 @@ export function LibraryScreen() {
                 </button>
               </div>
               {msgExpanded && (
-                <p
-                  className="mt-2 whitespace-pre-wrap text-stone-600"
-                  style={
-                    expandedCard.purpose === "hand"
-                      ? { fontSize: `${uiSettings.hand_viewer_font_size}px`, lineHeight: 1.85 }
-                      : { fontSize: "14px", lineHeight: 1.75 }
-                  }
-                >
-                  {expandedCard.message}
-                </p>
+                <div className="mt-2">
+                  <p
+                    className="whitespace-pre-wrap text-stone-600"
+                    style={
+                      expandedCard.purpose === "hand"
+                        ? { fontSize: `${uiSettings.hand_viewer_font_size}px`, lineHeight: 1.85 }
+                        : { fontSize: "14px", lineHeight: 1.75 }
+                    }
+                  >
+                    {expandedCard.message}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={savingMessage}
+                    onClick={async () => {
+                      setSavingMessage(true);
+                      try {
+                        await toggleSavedMessage(expandedCard.message, expandedCard.purpose);
+                      } finally {
+                        setSavingMessage(false);
+                      }
+                    }}
+                    className={`mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition disabled:opacity-50 ${
+                      isMessageSaved(expandedCard.message)
+                        ? "bg-[#7b310d] text-white"
+                        : "border border-[#7b310d] bg-white text-[#7b310d]"
+                    }`}
+                  >
+                    <Bookmark size={14} className={isMessageSaved(expandedCard.message) ? "fill-current" : ""} />
+                    {savingMessage ? "처리 중..." : isMessageSaved(expandedCard.message) ? "내 문구에 저장됨" : "내 문구로 저장"}
+                  </button>
+                </div>
               )}
             </div>
             <div className="mt-2 flex gap-2">
@@ -3566,6 +5305,7 @@ export function AnniversaryScreen() {
   const [mode, setMode] = useState<"home" | "calendar" | "manage" | "add">("home");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [listPage, setListPage] = useState(0);
+  const [listView, setListView] = useState<"page" | "wheel">("page");
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -3661,6 +5401,8 @@ export function AnniversaryScreen() {
   const totalPages = Math.max(1, Math.ceil(filteredList.length / pageSize));
   const safePage = Math.min(listPage, totalPages - 1);
   const pagedItems = filteredList.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  // 페이지 모드: 페이지 단위 / 휠 모드: 전체를 스크롤 영역에 표시
+  const visibleItems = listView === "wheel" ? filteredList : pagedItems;
 
   const resetForm = () => {
     setNewName("");
@@ -3723,9 +5465,31 @@ export function AnniversaryScreen() {
           <div className="mt-5 rounded-xl border border-stone-200 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <h2 className="font-bold text-sm text-stone-700">기념일 목록</h2>
-              <span className="text-xs font-semibold text-stone-400">
-                {filteredList.length}개
-              </span>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-full bg-stone-100 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setListView("page")}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition ${
+                      listView === "page" ? "bg-white text-[#7b310d] shadow-sm" : "text-stone-500"
+                    }`}
+                  >
+                    페이지
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListView("wheel")}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition ${
+                      listView === "wheel" ? "bg-white text-[#7b310d] shadow-sm" : "text-stone-500"
+                    }`}
+                  >
+                    휠
+                  </button>
+                </div>
+                <span className="text-xs font-semibold text-stone-400">
+                  {filteredList.length}개
+                </span>
+              </div>
             </div>
             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
               {categoryOptions.map((option) => {
@@ -3749,9 +5513,9 @@ export function AnniversaryScreen() {
               })}
             </div>
 
-            <div className="mt-4 space-y-2">
-              {pagedItems.length > 0 ? (
-                pagedItems.map((item) => (
+            <div className={`mt-4 space-y-2 ${listView === "wheel" ? "max-h-[50vh] overflow-y-auto overscroll-contain pr-1" : ""}`}>
+              {visibleItems.length > 0 ? (
+                visibleItems.map((item) => (
                   <div key={item.id} className="flex items-center gap-3 rounded-lg border border-stone-100 bg-stone-50 p-3">
                     <span className="text-2xl">{ANNIV_TYPE_ICONS[item.anniversary_type] ?? "✨"}</span>
                     <div className="min-w-0 flex-1">
@@ -3794,25 +5558,27 @@ export function AnniversaryScreen() {
               )}
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
-              <button
-                onClick={() => setListPage((p) => Math.max(0, p - 1))}
-                disabled={safePage === 0}
-                className="rounded-md border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 disabled:opacity-40"
-              >
-                이전
-              </button>
-              <span className="text-xs font-semibold text-stone-500">
-                {safePage + 1} / {totalPages}
-              </span>
-              <button
-                onClick={() => setListPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={safePage >= totalPages - 1}
-                className="rounded-md border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 disabled:opacity-40"
-              >
-                다음
-              </button>
-            </div>
+            {listView === "page" && (
+              <div className="mt-4 flex items-center justify-between">
+                <button
+                  onClick={() => setListPage((p) => Math.max(0, p - 1))}
+                  disabled={safePage === 0}
+                  className="rounded-md border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 disabled:opacity-40"
+                >
+                  이전
+                </button>
+                <span className="text-xs font-semibold text-stone-500">
+                  {safePage + 1} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setListPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={safePage >= totalPages - 1}
+                  className="rounded-md border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 disabled:opacity-40"
+                >
+                  다음
+                </button>
+              </div>
+            )}
           </div>
           <div className="mt-4 space-y-3">
             <AnnivAction icon={<CalendarDays />} title="달력으로 보기" text="기념일을 달력에서 확인하세요." onClick={() => setMode("calendar")} />

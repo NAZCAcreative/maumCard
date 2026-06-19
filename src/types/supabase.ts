@@ -338,6 +338,7 @@ export interface Database {
           hand_paper_style: string;
           hand_compose_font_size: number;
           hand_viewer_font_size: number;
+          whitespace_test_enabled: boolean;
           updated_at: string;
         };
         Insert: {
@@ -354,6 +355,7 @@ export interface Database {
           hand_paper_style?: string;
           hand_compose_font_size?: number;
           hand_viewer_font_size?: number;
+          whitespace_test_enabled?: boolean;
           updated_at?: string;
         };
         Update: {
@@ -369,6 +371,7 @@ export interface Database {
           hand_paper_style?: string;
           hand_compose_font_size?: number;
           hand_viewer_font_size?: number;
+          whitespace_test_enabled?: boolean;
           updated_at?: string;
         };
       };

@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { renderCardImage, type CardFont, type TextPosition } from "@/lib/card-text-render";
+import { CARD_HEIGHT, CARD_WIDTH, renderCardImage, type CardFont, type CardTextMetrics, type TextPosition } from "@/lib/card-text-render";
 import { composeCardWithAI } from "@/lib/card-ai-compose";
 import { loadBackground, resolveAccent } from "@/lib/card-background";
 import { resolveCardFontId } from "@/lib/card-fonts";
+import sharp from "sharp";
+
+type TextBoxRequest = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+};
 
 type CardImageRequest = {
   name?: string;
@@ -22,13 +30,25 @@ type CardImageRequest = {
   font?: CardFont;
   title_font?: CardFont; // 제목 글씨체
   content_font?: CardFont; // 내용 글씨체
+  footer_font?: CardFont; // 보내는 사람 글씨체
   // 자동 핏 수동 조정
   position?: TextPosition;
   title_scale?: number;
   content_scale?: number;
+  footer_scale?: number;
   sub_text?: string; // 추가 문구
   title_color?: string; // 제목 글자색 (hex 또는 "auto")
   content_color?: string; // 내용 글자색 (hex 또는 "auto")
+  footer_color?: string; // 보내는 사람 글자색 (hex 또는 "auto")
+  text_box?: TextBoxRequest;
+  title_box?: TextBoxRequest;
+  content_box?: TextBoxRequest;
+  footer_box?: TextBoxRequest;
+  title_rotation?: number;
+  content_rotation?: number;
+  footer_rotation?: number;
+  omit_text_part?: "title" | "content" | "footer";
+  background_only?: boolean;
 };
 
 const DEFAULT_NAME = "문주님";
@@ -57,10 +77,31 @@ export async function POST(request: Request) {
   const aiCompose = body.ai_compose === true;
   const font = resolveFont(body.font, handFont);
 
+  if (body.background_only) {
+    try {
+      const backgroundBuffer = await loadBackground(bg);
+      const imageBuffer = await sharp(backgroundBuffer)
+        .resize(CARD_WIDTH, CARD_HEIGHT, { fit: "cover", position: "centre" })
+        .png()
+        .toBuffer();
+      return new NextResponse(new Uint8Array(imageBuffer), {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "no-store",
+          "X-Render-Mode": "background-only",
+        },
+      });
+    } catch (error) {
+      console.error("[card-image] background render failed:", error);
+      return NextResponse.json({ error: "카드 배경 생성에 실패했습니다." }, { status: 500 });
+    }
+  }
+
   // ── 기본 경로: 무료 로컬 텍스트 합성 (즉시·한글 정확·OpenAI 미사용) ──
   if (!aiCompose) {
     try {
       const backgroundBuffer = await loadBackground(bg);
+      let textMetrics: CardTextMetrics | undefined;
       const imageBuffer = await renderCardImage({
         recipientLabel: recipientLabel ?? "", // 제목 (없으면 제목 없이 렌더)
         message,
@@ -69,12 +110,24 @@ export async function POST(request: Request) {
         font,
         titleFont: body.title_font ? resolveCardFontId(body.title_font) : font,
         contentFont: body.content_font ? resolveCardFontId(body.content_font) : font,
+        footerFont: body.footer_font ? resolveCardFontId(body.footer_font) : body.content_font ? resolveCardFontId(body.content_font) : font,
         position: body.position,
         titleScale: body.title_scale,
         contentScale: body.content_scale,
+        footerScale: body.footer_scale,
         subText: body.sub_text,
         titleColor: body.title_color,
         contentColor: body.content_color,
+        footerColor: body.footer_color,
+        textBox: body.text_box,
+        titleBox: body.title_box,
+        contentBox: body.content_box,
+        footerBox: body.footer_box,
+        titleRotation: body.title_rotation,
+        contentRotation: body.content_rotation,
+        footerRotation: body.footer_rotation,
+        omitTextPart: body.omit_text_part,
+        onMetrics: (metrics) => { textMetrics = metrics; },
       });
       return new NextResponse(new Uint8Array(imageBuffer), {
         headers: {
@@ -82,6 +135,7 @@ export async function POST(request: Request) {
           "Cache-Control": "no-store",
           "X-Render-Mode": "local-text",
           "X-Card-Font": font,
+          ...(textMetrics ? { "X-Card-Text-Metrics": encodeURIComponent(JSON.stringify(textMetrics)) } : {}),
         },
       });
     } catch (error) {

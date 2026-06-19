@@ -14,7 +14,7 @@ async function requireAdmin() {
 }
 
 const SELECT_COLUMNS =
-  "signup_bonus_credits, ai_suggestions_enabled, ai_background_enabled, ai_compose_enabled, announcement_enabled, announcement_title, announcement_message, hand_font_round_enabled, hand_font_brush_enabled, hand_font_pen_enabled, hand_paper_enabled, hand_paper_style, hand_compose_font_size, hand_viewer_font_size, updated_at";
+  "signup_bonus_credits, ai_suggestions_enabled, ai_background_enabled, ai_compose_enabled, announcement_enabled, announcement_title, announcement_message, hand_font_round_enabled, hand_font_brush_enabled, hand_font_pen_enabled, hand_paper_enabled, hand_paper_style, hand_compose_font_size, hand_viewer_font_size, whitespace_test_enabled, updated_at";
 
 function missingHint(message: string) {
   if (message.includes("hand_font_") || message.includes("hand_paper_")) return "손편지 글씨체/편지지 컬럼";
@@ -54,6 +54,7 @@ export async function GET() {
           hand_paper_style: "hanji",
           hand_compose_font_size: 18,
           hand_viewer_font_size: 18,
+          whitespace_test_enabled: false,
           updated_at: new Date().toISOString(),
         },
         setup_needed: true,
@@ -87,6 +88,7 @@ export async function PATCH(request: Request) {
     hand_paper_style?: string;
     hand_compose_font_size?: number;
     hand_viewer_font_size?: number;
+    whitespace_test_enabled?: boolean;
   };
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -104,6 +106,7 @@ export async function PATCH(request: Request) {
   if (typeof body.hand_paper_style === "string") updates.hand_paper_style = body.hand_paper_style.trim();
   if (typeof body.hand_compose_font_size === "number" && body.hand_compose_font_size >= 12) updates.hand_compose_font_size = body.hand_compose_font_size;
   if (typeof body.hand_viewer_font_size === "number" && body.hand_viewer_font_size >= 12) updates.hand_viewer_font_size = body.hand_viewer_font_size;
+  if (typeof body.whitespace_test_enabled === "boolean") updates.whitespace_test_enabled = body.whitespace_test_enabled;
 
   if (Object.keys(updates).length === 1) {
     return NextResponse.json({ error: "변경할 설정값이 없습니다." }, { status: 400 });
