@@ -13,18 +13,23 @@ export async function GET(request: Request) {
     next = "/";
   }
 
-  const supabase = await createClient();
-  let authError: unknown = null;
+  // OAuth 공급자(구글/Supabase)가 코드 대신 에러를 돌려준 경우도 잡는다.
+  const providerError = searchParams.get("error_description") || searchParams.get("error");
 
-  if (code) {
+  const supabase = await createClient();
+  let authError: unknown = providerError ? new Error(providerError) : null;
+
+  if (!authError && code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     authError = error;
-  } else if (tokenHash && type) {
+  } else if (!authError && tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({
       token_hash: tokenHash,
       type,
     });
     authError = error;
+  } else if (!authError && !code && !tokenHash) {
+    authError = new Error("인증 코드가 전달되지 않았습니다 (code/token_hash 없음)");
   }
 
   if ((code || tokenHash) && !authError) {
@@ -42,7 +47,19 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}${next}`);
   }
 
-  if (authError) console.error("Supabase auth callback failed:", authError);
+  // 실제 실패 사유를 로그인 페이지로 넘겨 화면에서 확인 가능하게 한다.
+  const reason =
+    authError instanceof Error
+      ? authError.message
+      : typeof authError === "object" && authError && "message" in authError
+        ? String((authError as { message: unknown }).message)
+        : "unknown";
+  console.error("Supabase auth callback failed:", authError);
 
-  return NextResponse.redirect(`${origin}/login?error=auth_callback`);
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const base =
+    process.env.NODE_ENV !== "development" && forwardedHost ? `https://${forwardedHost}` : origin;
+  return NextResponse.redirect(
+    `${base}/login?error=auth_callback&reason=${encodeURIComponent(reason)}`
+  );
 }

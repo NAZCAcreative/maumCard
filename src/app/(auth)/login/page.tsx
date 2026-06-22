@@ -9,7 +9,9 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(
     searchParams.get("error")
-      ? "로그인 처리 중 문제가 발생했습니다. 다시 시도해 주세요."
+      ? `로그인 처리 중 문제가 발생했습니다. 다시 시도해 주세요.${
+          searchParams.get("reason") ? `\n(사유: ${searchParams.get("reason")})` : ""
+        }`
       : null,
   );
   const [loading, setLoading] = useState<"google" | "email" | null>(null);
@@ -98,7 +100,7 @@ function LoginContent() {
           </p>
         )}
         {error && (
-          <p className="rounded-md bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-700">
+          <p className="whitespace-pre-line rounded-md bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-700">
             {error}
           </p>
         )}
