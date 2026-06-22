@@ -296,11 +296,14 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
     const titleAvailH = Math.max(60, titlePx.height - splitPadY * 2);
     const contentAvailW = Math.max(140, contentPx.width - splitPadX * 2);
     const contentAvailH = Math.max(80, contentPx.height - splitPadY * 2);
-    const splitContentSize = Math.round(fitContentSize(contentAvailW, contentAvailH, message, 1.36, contentScale));
+    // 본문 자동 핏 기준 크기(배율 미적용). title/footer 는 이 기준으로만 파생해
+    // 본문 배율(contentScale) 변경에 끌려가지 않도록 한다.
+    const splitBaseSize = Math.round(fitContentSize(contentAvailW, contentAvailH, message, 1.36, 1));
+    const splitContentSize = Math.round(splitBaseSize * contentScale);
     const splitTitleSize = hasTitle
-      ? Math.round(Math.min(titleAvailH * 0.86, titleAvailW / Math.max(1.8, recipientLabel.length) * 1.35, splitContentSize * 2) * titleScale)
+      ? Math.round(Math.min(titleAvailH * 0.86, titleAvailW / Math.max(1.8, recipientLabel.length) * 1.35, splitBaseSize * 2) * titleScale)
       : 0;
-    const splitFooterSize = subText ? Math.round(splitContentSize * footerScale) : 0;
+    const splitFooterSize = subText ? Math.round(splitBaseSize * footerScale) : 0;
     opts.onMetrics?.({
       titleSize: splitTitleSize,
       contentSize: splitContentSize,

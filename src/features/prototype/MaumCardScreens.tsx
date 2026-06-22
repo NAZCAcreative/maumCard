@@ -254,18 +254,16 @@ function getInlineFontSize(part: PreviewTextPart, availableBox: TextBox, draft: 
   // BODY(본문) 기준 크기를 먼저 산출한다.
   const reservedRatio = (draft.title?.trim() ? 0.17 : 0) + (draft.footer?.trim() ? 0.12 : 0);
   const bodyHeight = availableHeight * clampRange(0.76 - reservedRatio, 0.5, 0.76);
-  const bodySize = fitInlineContentSize(
-    availableWidth,
-    bodyHeight,
-    draft.message || " ",
-    1.36,
-    draft.contentScale ?? typography.contentScale,
-  );
+  // 본문 자동 핏 크기(배율 미적용)를 기준으로 잡는다.
+  const bodyFit = fitInlineContentSize(availableWidth, bodyHeight, draft.message || " ", 1.36, 1);
+  // title/footer 는 "권장 본문 크기"만 기준 → 본문(content) 수동 배율을 바꿔도 끌려가지 않음.
+  const bodyBaseForOthers = bodyFit * typography.contentScale;
+  const bodySize = Math.round(bodyFit * (draft.contentScale ?? typography.contentScale));
 
   if (part === "content") return bodySize;
-  // 기본: TITLE = BODY × 1.5, FOOTER = BODY × 0.9 (사용자 수동 배율은 위에 곱함)
-  if (part === "footer") return Math.round(bodySize * PREVIEW_FOOTER_BODY_RATIO * (draft.footerScale ?? DEFAULT_FOOTER_SCALE));
-  return Math.round(bodySize * PREVIEW_TITLE_BODY_RATIO * (draft.titleScale ?? 1));
+  // 기본: TITLE = BODY × 1.5, FOOTER = BODY × 0.9 (각자 수동 배율만 곱함)
+  if (part === "footer") return Math.round(bodyBaseForOthers * PREVIEW_FOOTER_BODY_RATIO * (draft.footerScale ?? DEFAULT_FOOTER_SCALE));
+  return Math.round(bodyBaseForOthers * PREVIEW_TITLE_BODY_RATIO * (draft.titleScale ?? 1));
 }
 
 function insertLineBreakAtCursor() {
@@ -2626,7 +2624,7 @@ export function BackgroundScreen() {
   })();
 
   return (
-    <PhoneShell backHref="/home">
+    <PhoneShell backHref="/">
       <h1 className="text-center text-2xl font-black leading-9">마음에 드는 배경을<br />선택해주세요.</h1>
       {/* 재정렬 흐름: 배경(1단계) */}
 
@@ -3201,7 +3199,7 @@ export function PreviewScreen() {
   // 생성 시작부터 뒤로가기 차단 — 홈으로 보냄 (진행 중 이탈 시 API 낭비 방지)
   useEffect(() => {
     window.history.pushState(null, "", window.location.href);
-    const onPop = () => router.replace("/home");
+    const onPop = () => router.replace("/");
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [router]);
@@ -3903,7 +3901,7 @@ export function PreviewScreen() {
       : "거의 완성됐어요!";
 
     return (
-      <PhoneShell backHref="/home">
+      <PhoneShell backHref="/">
         <div className="flex min-h-[640px] flex-col items-center justify-center text-center">
           {/* 반짝이는 파티클 (hydration 이후 클라이언트 전용 렌더 — SSR 불일치 방지) */}
           <div className="relative mb-2 h-40 w-40" suppressHydrationWarning>
@@ -3962,7 +3960,7 @@ export function PreviewScreen() {
   }
 
   return (
-    <PhoneShell backHref="/home">
+    <PhoneShell backHref="/">
       <LoadingOverlay
         open={finalizing}
         title="저장 중입니다"
