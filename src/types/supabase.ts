@@ -68,6 +68,8 @@ export interface Database {
           background_id: string;
           is_ai_bg: boolean;
           card_image_url: string | null;
+          editor_state?: Json;
+          compose_mode: string;
           share_token: string | null;
           is_favorite: boolean;
           is_hidden: boolean;
@@ -83,6 +85,8 @@ export interface Database {
           background_id: string;
           is_ai_bg?: boolean;
           card_image_url?: string | null;
+          editor_state?: Json;
+          compose_mode?: string;
           share_token?: string | null;
           is_favorite?: boolean;
           is_hidden?: boolean;
@@ -95,6 +99,8 @@ export interface Database {
           background_id?: string;
           is_ai_bg?: boolean;
           card_image_url?: string | null;
+          editor_state?: Json;
+          compose_mode?: string;
           share_token?: string | null;
           is_favorite?: boolean;
           is_hidden?: boolean;

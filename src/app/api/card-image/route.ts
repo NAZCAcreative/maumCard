@@ -48,6 +48,9 @@ type CardImageRequest = {
   content_rotation?: number;
   footer_rotation?: number;
   omit_text_part?: "title" | "content" | "footer";
+  title_bold?: boolean;
+  content_bold?: boolean;
+  footer_bold?: boolean;
   background_only?: boolean;
 };
 
@@ -127,6 +130,9 @@ export async function POST(request: Request) {
         contentRotation: body.content_rotation,
         footerRotation: body.footer_rotation,
         omitTextPart: body.omit_text_part,
+        titleBold: body.title_bold,
+        contentBold: body.content_bold,
+        footerBold: body.footer_bold,
         onMetrics: (metrics) => { textMetrics = metrics; },
       });
       return new NextResponse(new Uint8Array(imageBuffer), {

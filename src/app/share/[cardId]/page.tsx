@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { SmoothImage } from "@/components/ui/SmoothImage";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ const BG_STYLES: Record<string, { swatch: string; mark: string }> = {
   spring: { swatch: "from-lime-100 via-sky-50 to-rose-100", mark: "봄" },
   autumn: { swatch: "from-yellow-100 via-orange-100 to-red-100", mark: "가을" },
   winter: { swatch: "from-slate-100 via-sky-50 to-blue-100", mark: "겨울" },
+  cosmic: { swatch: "from-blue-100 via-purple-100 via-pink-100 to-red-100", mark: "우주" },
 };
 
 type Props = { params: Promise<{ cardId: string }> };
@@ -67,15 +69,13 @@ export default async function SharePage({ params }: Props) {
         className={`relative overflow-hidden rounded-xl bg-gradient-to-br ${bg.swatch} p-5 shadow-lg`}
       >
         {card?.card_image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SmoothImage
             src={card.card_image_url}
             alt="공유 마음카드"
             className="w-full rounded-lg"
           />
         ) : aiBackgroundUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SmoothImage
             src={aiBackgroundUrl}
             alt=""
             className="absolute inset-0 h-full w-full object-cover"

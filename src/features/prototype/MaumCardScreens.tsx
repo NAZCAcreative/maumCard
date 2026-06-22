@@ -39,14 +39,14 @@ import { getFavoriteMessages, addFavoriteMessage, deleteFavoriteMessage } from "
 import type { FavoriteMessage } from "@/lib/favoriteMessages";
 import { getAnniversaries, createAnniversary, updateAnniversary, deleteAnniversary } from "@/lib/anniversaries";
 import type { AnniversaryInsertData } from "@/lib/anniversaries";
-import { shareCard } from "@/lib/kakao";
 import { useAIBackground } from "@/features/card-create/hooks/useAIBackground";
 import { CreditBalance } from "@/features/payment/components/CreditBalance";
 import { isAdminEmail } from "@/lib/adminAccess";
 import { CARD_FONTS } from "@/lib/card-fonts";
 import { ThemePanel } from "@/components/layout/ThemeSettings";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
-import type { Database } from "@/types/supabase";
+import { SmoothImage } from "@/components/ui/SmoothImage";
+import type { Database, Json } from "@/types/supabase";
 import Image from "next/image";
 
 type Purpose = "birthday" | "love" | "health" | "thanks" | "comfort" | "congrats" | "morning" | "night" | "hand" | "custom";
@@ -59,6 +59,7 @@ type CardItem = {
   createdAt: string;
   favorite?: boolean;
   cardImageUrl?: string | null;
+  editorState?: Draft;
 };
 type TextBox = {
   x0: number;
@@ -99,6 +100,9 @@ type Draft = {
   footer?: string; // 하단 메세지 (내용 아래)
   authorEnabled?: boolean; // 작성자 표시 여부
   author?: string; // 작성자 이름
+  titleBold?: boolean; // 제목 굵게 여부
+  contentBold?: boolean; // 내용 굵게 여부
+  footerBold?: boolean; // 보내는 사람 굵게 여부
 };
 
 type HandFont = "round" | "brush" | "pen";
@@ -136,6 +140,9 @@ const defaultDraft: Draft = {
   handFont: "round",
   handTone: "general",
   handMode: "recommend",
+  titleBold: false,
+  contentBold: false,
+  footerBold: false,
 };
 
 const draftStorageKey = "maumcard:draft";
@@ -195,17 +202,16 @@ function getTextLines(text: string, charsPerLine: number) {
 const CARD_PREVIEW_WIDTH = 1024;
 const CARD_PREVIEW_HEIGHT = 1536;
 const TEXT_BOX_PAD_X = 8;
-const TEXT_BOX_PAD_Y = 4;
 
 function estimateFontPx(kind: PreviewTextPart, text: string, scale = 1) {
   const len = text.replace(/\s/g, "").length;
   if (kind === "title") return clampRange((len <= 6 ? 150 : len <= 12 ? 124 : 104) * scale, 72, 170);
   if (kind === "footer") return clampRange((len <= 14 ? 62 : 52) * scale, 40, 78);
-  if (len <= 12) return clampRange(168 * scale, 96, 220);
-  if (len <= 24) return clampRange(138 * scale, 82, 190);
-  if (len <= 55) return clampRange(104 * scale, 64, 150);
-  if (len <= 100) return clampRange(78 * scale, 52, 118);
-  return clampRange(58 * scale, 42, 92);
+  if (len <= 12) return clampRange(196 * scale, 120, 240);
+  if (len <= 24) return clampRange(168 * scale, 100, 210);
+  if (len <= 55) return clampRange(124 * scale, 80, 180);
+  if (len <= 100) return clampRange(96 * scale, 64, 140);
+  return clampRange(72 * scale, 52, 110);
 }
 
 function estimateRenderedLines(text: string, fontPx: number, boxWidthRatio: number) {
@@ -216,17 +222,18 @@ function estimateRenderedLines(text: string, fontPx: number, boxWidthRatio: numb
 
 function fitInlineContentSize(availW: number, availH: number, text: string, lineHeight = 1.36, scale = 1) {
   const len = text.replace(/\s/g, "").length;
-  const max = len <= 12 ? 156 : len <= 24 ? 142 : 128;
-  for (let fontSize = max; fontSize >= 40; fontSize -= 2) {
+  const max = len <= 12 ? 190 : len <= 24 ? 170 : 150;
+  for (let fontSize = max; fontSize >= 48; fontSize -= 2) {
     const lines = getTextLines(text, Math.max(1, Math.floor(availW / (fontSize * 1.02))));
     if (lines * fontSize * lineHeight <= availH) return fontSize * scale;
   }
-  return 40 * scale;
+  return 48 * scale;
 }
 
 // 미리보기 기본 폰트 비율 — TITLE/FOOTER는 BODY(본문) 크기를 기준으로 파생한다.
 const PREVIEW_TITLE_BODY_RATIO = 1.5;
-const PREVIEW_FOOTER_BODY_RATIO = 0.7;
+const PREVIEW_FOOTER_BODY_RATIO = 0.9;
+const DEFAULT_FOOTER_SCALE = 1;
 
 function getInlineFontSize(part: PreviewTextPart, availableBox: TextBox, draft: Draft) {
   const typography = getRecommendedTypography(draft);
@@ -245,8 +252,8 @@ function getInlineFontSize(part: PreviewTextPart, availableBox: TextBox, draft: 
   );
 
   if (part === "content") return bodySize;
-  // 기본: TITLE = BODY × 1.5, FOOTER = BODY × 0.7 (사용자 수동 배율은 위에 곱함)
-  if (part === "footer") return Math.round(bodySize * PREVIEW_FOOTER_BODY_RATIO * (draft.footerScale ?? 1));
+  // 기본: TITLE = BODY × 1.5, FOOTER = BODY × 0.9 (사용자 수동 배율은 위에 곱함)
+  if (part === "footer") return Math.round(bodySize * PREVIEW_FOOTER_BODY_RATIO * (draft.footerScale ?? DEFAULT_FOOTER_SCALE));
   return Math.round(bodySize * PREVIEW_TITLE_BODY_RATIO * (draft.titleScale ?? 1));
 }
 
@@ -293,8 +300,8 @@ function estimateBoxHeightRatio(kind: PreviewTextPart, text: string, fontPx: num
   const lines = estimateRenderedLines(text, fontPx, boxWidthRatio);
   const verticalPadding = kind === "content" ? 18 : kind === "footer" ? 14 : 16;
   const px = lines * fontPx * lineHeight + verticalPadding;
-  const min = kind === "content" ? 0.075 : kind === "footer" ? 0.06 : 0.07;
-  const max = kind === "content" ? 0.34 : kind === "footer" ? 0.13 : 0.16;
+  const min = kind === "content" ? 0.10 : kind === "footer" ? 0.06 : 0.07;
+  const max = kind === "content" ? 0.45 : kind === "footer" ? 0.13 : 0.16;
   return clampRange(px / CARD_PREVIEW_HEIGHT, min, max);
 }
 
@@ -315,7 +322,7 @@ function getDefaultBoxMetrics(draft?: TextBoxSizingDraft) {
   const footerLen = footer.replace(/\s/g, "").length || 6;
 
   const titleW = clampRange(0.3 + titleLen * 0.024 * titleScale, 0.38, 0.68);
-  const contentW = clampRange(0.52 + Math.min(contentLen, 110) * 0.0032 * contentScale, 0.64, 0.84);
+  const contentW = clampRange(0.60 + Math.min(contentLen, 110) * 0.0032 * contentScale, 0.72, 0.90);
   const footerW = clampRange(0.28 + footerLen * 0.017, 0.36, 0.62);
   const titleH = clampRange(
     estimateBoxHeightRatio("title", title || "TITLE", estimateFontPx("title", title || "TITLE", titleScale), titleW),
@@ -323,7 +330,7 @@ function getDefaultBoxMetrics(draft?: TextBoxSizingDraft) {
     0.16,
   );
   const contentH = estimateBoxHeightRatio("content", message || "BODY", estimateFontPx("content", message || "BODY", contentScale), contentW);
-  const footerH = estimateBoxHeightRatio("footer", footer || "FOOTER", estimateFontPx("footer", footer || "FOOTER", draft?.footerScale ?? 1), footerW);
+  const footerH = estimateBoxHeightRatio("footer", footer || "FOOTER", estimateFontPx("footer", footer || "FOOTER", draft?.footerScale ?? DEFAULT_FOOTER_SCALE), footerW);
 
   return { titleH, contentH, footerH, titleW, contentW, footerW };
 }
@@ -357,8 +364,8 @@ function getDefaultPartTextBoxes(position?: Draft["cardPosition"], draft?: TextB
   const hasTitle = Boolean(draft?.title?.trim());
   const hasFooter = Boolean(draft?.footer?.trim() || (draft?.authorEnabled && draft?.author?.trim()));
   if (!hasTitle && !hasFooter) {
-    const bodyOnlyHeight = clampRange(metrics.contentH * 1.06, 0.12, 0.42);
-    const bodyOnlyWidth = clampRange(metrics.contentW * 1.08, 0.72, 0.88);
+    const bodyOnlyHeight = clampRange(metrics.contentH * 1.06, 0.15, 0.52);
+    const bodyOnlyWidth = clampRange(metrics.contentW * 1.08, 0.76, 0.92);
     const contentTextBox = centeredTextBox(bodyOnlyWidth, position === "top" ? 0.16 : position === "bottom" ? 0.78 - bodyOnlyHeight : 0.5 - bodyOnlyHeight / 2, bodyOnlyHeight);
     const titleTextBox = centeredTextBox(metrics.titleW, Math.max(0.06, contentTextBox.y0 - titleBodyGap - metrics.titleH), metrics.titleH);
     const footerTextBox = rightAlignedTextBox(metrics.footerW, Math.min(0.92 - metrics.footerH, contentTextBox.y1 + bodyFooterGap), metrics.footerH, contentTextBox.x1);
@@ -686,6 +693,7 @@ const backgrounds = [
   { id: "ocean_deep", swatch: "from-blue-200 via-cyan-100 to-teal-200", mark: "🐚" },
   { id: "gold", swatch: "from-yellow-100 via-amber-100 to-yellow-200", mark: "🌟" },
   { id: "mint", swatch: "from-teal-50 via-green-50 to-cyan-100", mark: "🌿" },
+  { id: "cosmic", swatch: "from-blue-100 via-purple-100 via-pink-100 to-red-100", mark: "🌌" },
 ];
 
 const defaultCards: CardItem[] = [
@@ -725,22 +733,25 @@ function writeJson<T>(key: string, value: T) {
 
 function useDraft() {
   const [draft, setDraftState] = useState<Draft>(defaultDraft);
+  const latestDraftRef = useRef<Draft>(defaultDraft);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setDraftState({ ...defaultDraft, ...readJson<Draft>(draftStorageKey, defaultDraft) });
+    const storedDraft = { ...defaultDraft, ...readJson<Draft>(draftStorageKey, defaultDraft) };
+    latestDraftRef.current = storedDraft;
+    setDraftState(storedDraft);
     setHydrated(true);
   }, []);
 
   const setDraft = useCallback((next: Partial<Draft>) => {
-    setDraftState((prev) => {
-      const value = { ...prev, ...next };
-      writeJson(draftStorageKey, value);
-      return value;
-    });
+    const value = { ...latestDraftRef.current, ...next };
+    latestDraftRef.current = value;
+    writeJson(draftStorageKey, value);
+    setDraftState(value);
   }, []);
 
   const resetDraft = useCallback(() => {
+    latestDraftRef.current = defaultDraft;
     setDraftState(defaultDraft);
     writeJson(draftStorageKey, defaultDraft);
   }, []);
@@ -752,6 +763,17 @@ type DbCard = Database["public"]["Tables"]["card_library"]["Row"];
 
 function mapDbCard(dbCard: DbCard): CardItem {
   const images = readJson<Record<string, string>>("maumcard:card-images", {});
+  const savedEditorStates = readJson<Record<string, Draft>>("maumcard:card-editor-states", {});
+  let editorState: Draft | undefined = dbCard.editor_state && typeof dbCard.editor_state === "object" && !Array.isArray(dbCard.editor_state)
+    ? dbCard.editor_state as unknown as Draft
+    : savedEditorStates[dbCard.id];
+  if (!editorState && dbCard.compose_mode?.startsWith("editor:")) {
+    try {
+      editorState = JSON.parse(dbCard.compose_mode.slice(7)) as Draft;
+    } catch {
+      editorState = undefined;
+    }
+  }
   return {
     id: dbCard.id,
     name: dbCard.recipient,
@@ -761,6 +783,7 @@ function mapDbCard(dbCard: DbCard): CardItem {
     createdAt: new Date(dbCard.created_at).toLocaleDateString("ko-KR").replace(/\.$/, ""),
     favorite: dbCard.is_favorite,
     cardImageUrl: dbCard.card_image_url ?? images[dbCard.id] ?? null,
+    editorState,
   };
 }
 
@@ -811,11 +834,14 @@ function useSupabaseCards() {
   const loadedRef = useRef(false);
 
   const refresh = useCallback(async () => {
+    const localCards = readJson<CardItem[]>("maumcard:cards", []);
     try {
       const data = await getMyCards();
-      setCards(data.length > 0 ? data.map(mapDbCard) : []);
+      const remoteCards = data.map(mapDbCard);
+      const remoteIds = new Set(remoteCards.map((card) => card.id));
+      setCards([...localCards.filter((card) => !remoteIds.has(card.id)), ...remoteCards]);
     } catch {
-      if (!loadedRef.current) setCards(defaultCards);
+      if (!loadedRef.current) setCards(localCards.length > 0 ? localCards : defaultCards);
     } finally {
       loadedRef.current = true;
       setLoading(false);
@@ -852,44 +878,12 @@ function useSupabaseCards() {
 
   const addCard = useCallback(async (draft: Draft, composedImageBlob?: Blob | null): Promise<string | null> => {
     // 보관함 제목 = 미리보기 제목(없으면 내용 일부)
-    const cardTitle = draft.title?.trim() || draft.message?.trim().slice(0, 12) || "무제";
-    try {
-      const card = await saveCard({
-        purpose: draft.purpose || "love",
-        recipient: cardTitle,
-        honorific: draft.honorific || "에게",
-        message: draft.message,
-        background_id: draft.bg,
-        is_ai_bg: draft.bg.startsWith("ai:"),
-      });
+    const cardTitle = draft.title?.trim() || draft.name?.trim() || draft.message?.trim().slice(0, 12) || "무제";
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-      // Upload composed image to Supabase Storage and persist URL in localStorage
-      let uploadedCardImageUrl: string | null = null;
-      if (composedImageBlob) {
-        try {
-          const supabase = createClient();
-          const fileName = `cards/${Date.now()}_${Math.random().toString(36).slice(2)}.png`;
-          const { error: uploadError } = await supabase.storage
-            .from("card-images")
-            .upload(fileName, composedImageBlob, { contentType: "image/png", upsert: false });
-          if (!uploadError) {
-            const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(fileName);
-            uploadedCardImageUrl = publicUrl;
-            await updateCardImageUrl(card.id, publicUrl).catch((e) => console.error("카드 이미지 URL 저장 실패:", e));
-            const images = readJson<Record<string, string>>("maumcard:card-images", {});
-            writeJson("maumcard:card-images", { ...images, [card.id]: publicUrl });
-          }
-        } catch {
-          // Storage upload failed — continue without image
-        }
-      }
-
-      await refresh();
-      if (uploadedCardImageUrl) {
-        setCards((prev) => prev.map((c) => c.id === card.id ? { ...c, cardImageUrl: uploadedCardImageUrl } : c));
-      }
-      return card.id;
-    } catch {
+    if (authError) throw authError;
+    if (!user) {
       // 미로그인 상태 — localStorage에 임시 저장 후 로컬 ID 반환
       const localId = `local-${Date.now()}`;
       const localCard: CardItem = {
@@ -903,11 +897,55 @@ function useSupabaseCards() {
       if (composedImageBlob) {
         localCard.cardImageUrl = URL.createObjectURL(composedImageBlob);
       }
+      localCard.editorState = { ...draft };
       const existing = readJson<CardItem[]>("maumcard:cards", []);
       writeJson("maumcard:cards", [localCard, ...existing]);
       setCards((prev) => [localCard, ...prev]);
       return localId;
     }
+
+    if (!composedImageBlob) {
+      throw new Error("완성된 카드 이미지가 없습니다.");
+    }
+
+    const fileName = `${user.id}/cards/${Date.now()}_${Math.random().toString(36).slice(2)}.png`;
+    const { error: uploadError } = await supabase.storage
+      .from("card-images")
+      .upload(fileName, composedImageBlob, { contentType: "image/png", upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(fileName);
+    const card = await saveCard({
+      purpose: draft.purpose || "love",
+      recipient: cardTitle,
+      honorific: draft.honorific || "에게",
+      message: draft.message,
+      background_id: draft.bg,
+      is_ai_bg: draft.bg.startsWith("ai:"),
+      card_image_url: publicUrl,
+      editor_state: { ...draft } as unknown as Json,
+    });
+    const savedComposeMode = typeof card.compose_mode === "string" ? card.compose_mode : "";
+    const savedEditorState = savedComposeMode.startsWith("editor:")
+      ? JSON.parse(savedComposeMode.slice(7)) as Draft
+      : null;
+    if (
+      card.message !== draft.message
+      || card.recipient !== cardTitle
+      || card.card_image_url !== publicUrl
+      || savedEditorState?.title !== draft.title
+      || savedEditorState?.footer !== draft.footer
+    ) {
+      throw new Error("저장된 카드 정보 검증에 실패했습니다.");
+    }
+
+    const images = readJson<Record<string, string>>("maumcard:card-images", {});
+    const editorStates = readJson<Record<string, Draft>>("maumcard:card-editor-states", {});
+    writeJson("maumcard:card-images", { ...images, [card.id]: publicUrl });
+    writeJson("maumcard:card-editor-states", { ...editorStates, [card.id]: { ...draft } });
+    await refresh();
+    setCards((prev) => prev.map((item) => item.id === card.id ? { ...item, cardImageUrl: publicUrl } : item));
+    return card.id;
   }, [refresh]);
 
   const toggleFav = useCallback(async (cardId: string, isFavorite: boolean) => {
@@ -980,19 +1018,6 @@ function useSupabaseAnniversaries() {
   return { items, refresh, add, update, remove };
 }
 
-function useAiEnabled() {
-  const [enabled, setEnabled] = useState(true);
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((d: { ai_suggestions_enabled?: boolean }) => {
-        if (typeof d.ai_suggestions_enabled === "boolean") setEnabled(d.ai_suggestions_enabled);
-      })
-      .catch(() => {});
-  }, []);
-  return enabled;
-}
-
 type PublicUiSettings = {
   ai_background_enabled: boolean;
   ai_compose_enabled: boolean;
@@ -1004,6 +1029,7 @@ type PublicUiSettings = {
   hand_compose_font_size: number;
   hand_viewer_font_size: number;
   whitespace_test_enabled: boolean;
+  enabled_fonts?: string[];
 };
 
 function usePublicUiSettings() {
@@ -1018,6 +1044,7 @@ function usePublicUiSettings() {
     hand_compose_font_size: 18,
     hand_viewer_font_size: 18,
     whitespace_test_enabled: false,
+    enabled_fonts: undefined,
   });
 
   useEffect(() => {
@@ -1035,6 +1062,7 @@ function usePublicUiSettings() {
           hand_compose_font_size: typeof d.hand_compose_font_size === "number" ? d.hand_compose_font_size : prev.hand_compose_font_size,
           hand_viewer_font_size: typeof d.hand_viewer_font_size === "number" ? d.hand_viewer_font_size : prev.hand_viewer_font_size,
           whitespace_test_enabled: typeof d.whitespace_test_enabled === "boolean" ? d.whitespace_test_enabled : prev.whitespace_test_enabled,
+          enabled_fonts: Array.isArray(d.enabled_fonts) ? d.enabled_fonts : prev.enabled_fonts,
         }));
       })
       .catch(() => {});
@@ -1215,7 +1243,7 @@ function PhoneShell({
   return (
     <main className="app-shell mx-auto min-h-screen w-full max-w-md text-stone-950 shadow-[0_0_0_1px_rgba(28,25,23,0.06)] sm:max-w-2xl lg:max-w-5xl">
       {!hideHeader && <Header title={title} backHref={backHref} />}
-      <div className={hideHeader ? "pb-24" : "px-4 pb-24 pt-5 sm:px-6 lg:px-8"}>{children}</div>
+      <div className={`cute-page-enter ${hideHeader ? "pb-24" : "px-4 pb-24 pt-5 sm:px-6 lg:px-8"}`}>{children}</div>
     </main>
   );
 }
@@ -1229,21 +1257,12 @@ function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   );
 }
 
-function SecondaryLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link href={href} className="flex h-12 items-center justify-center gap-2 rounded-md border border-[#7b310d]-strong bg-white font-bold text-[#7b310d]">
-      {children}
-    </Link>
-  );
-}
-
 function CardArt({ card }: { card: Pick<CardItem, "name" | "message" | "bg" | "cardImageUrl"> }) {
   // If we have the actual composed card image, show it directly
   if (card.cardImageUrl) {
     return (
       <div className="relative aspect-[3/4] overflow-hidden rounded-2xl shadow-lg bg-stone-200">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <SmoothImage
           src={card.cardImageUrl}
           alt={`${card.name}에게 보내는 카드`}
           className="absolute inset-0 h-full w-full object-cover"
@@ -1263,8 +1282,7 @@ function CardArt({ card }: { card: Pick<CardItem, "name" | "message" | "bg" | "c
   return (
     <div className={`relative aspect-[3/4] overflow-hidden rounded-2xl shadow-lg ${!imageUrl ? `bg-gradient-to-br ${bg.swatch}` : "bg-stone-200"}`}>
       {imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <SmoothImage
           src={imageUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
@@ -1598,8 +1616,7 @@ export function HomeScreen() {
             <div className="relative flex flex-col items-center overflow-hidden rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
               <div className="relative mb-3 aspect-[3/4] w-full overflow-hidden rounded-xl bg-surface-container">
                 {featuredImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={featuredImageUrl} alt={featuredHomeCard?.title ?? "추천 마음카드"} className="h-full w-full object-cover object-top" />
+                  <SmoothImage src={featuredImageUrl} alt={featuredHomeCard?.title ?? "추천 마음카드"} className="h-full w-full object-cover object-top" />
                 ) : (
                   <div className="relative h-full w-full bg-gradient-to-br from-primary-fixed via-surface-container-lowest to-secondary-fixed">
                     <div className="absolute left-5 top-6 text-primary/25">
@@ -1736,9 +1753,9 @@ function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
 }
 
 type MsgLength = "short" | "long" | "hand";
-type ShortMode = "recommend" | "direct" | "ai";
-type LongMode = "long_recommend" | "direct" | "long_ai";
-type HandMode = "hand_recommend" | "direct" | "hand_ai";
+type ShortMode = "recommend" | "direct";
+type LongMode = "long_recommend" | "direct";
+type HandMode = "hand_recommend" | "direct";
 
 // AI 문장 수정 — 직접입력에서 고를 수 있는 느낌(말투) 옵션 10가지. id는 /api/ai-correct의 TONE_INSTRUCTIONS와 매칭.
 const AI_TONE_OPTIONS: { id: string; label: string }[] = [
@@ -1772,7 +1789,6 @@ export function MessageScreen() {
   const [shortMode, setShortMode] = useState<ShortMode>(isDirect ? "direct" : "recommend");
   const [longMode, setLongMode] = useState<LongMode>(isDirect ? "direct" : "long_recommend");
   const [handMode, setHandMode] = useState<HandMode>(isDirect ? "direct" : "hand_recommend");
-  const aiEnabled = useAiEnabled();
   const uiSettings = usePublicUiSettings();
   const handMessageMaxLength = handMessageMaxLengthByTone.general;
   const handMessages = handMessagesByTone.general;
@@ -1781,15 +1797,6 @@ export function MessageScreen() {
     if (option.id === "brush") return uiSettings.hand_font_brush_enabled;
     return uiSettings.hand_font_pen_enabled;
   });
-  const [aiMessages, setAiMessages] = useState<string[]>([]);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiFallback, setAiFallback] = useState(false);
-
-  const [longAiMessages, setLongAiMessages] = useState<string[]>([]);
-  const [longAiLoading, setLongAiLoading] = useState(false);
-  const [longAiError, setLongAiError] = useState<string | null>(null);
-
   const [correcting, setCorrecting] = useState(false);
   const [correctedOptions, setCorrectedOptions] = useState<string[] | null>(null);
   const [correctError, setCorrectError] = useState<string | null>(null);
@@ -1820,11 +1827,6 @@ export function MessageScreen() {
       titleFont: undefined,
       contentFont: undefined,
     });
-    setAiMessages([]);
-    setAiError(null);
-    setAiFallback(false);
-    setLongAiMessages([]);
-    setLongAiError(null);
     setCorrectedOptions(null);
     setCorrectError(null);
   }, [draftHydrated, setDraft]);
@@ -1841,34 +1843,6 @@ export function MessageScreen() {
     (length === "short" && shortMode === "direct") ||
     (length === "long" && longMode === "direct") ||
     (length === "hand" && handMode === "direct");
-
-  const fetchAiMessages = useCallback(async (isLong: boolean) => {
-    if (isLong) { setLongAiLoading(true); setLongAiError(null); }
-    else { setAiLoading(true); setAiError(null); setAiFallback(false); }
-    try {
-      const res = await fetch("/api/ai-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ purpose: selectedPurpose, recipient: draft.name, honorific: draft.honorific, long: isLong }),
-      });
-      const data = await res.json().catch(() => ({})) as { messages?: string[]; fallback?: boolean; error?: string };
-      if (!res.ok || !data.messages?.length) throw new Error(data.error ?? "AI 문구 생성에 실패했습니다.");
-      if (isLong) setLongAiMessages(data.messages);
-      else { setAiMessages(data.messages); setAiFallback(Boolean(data.fallback)); }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "AI 문구 생성에 실패했습니다.";
-      if (isLong) setLongAiError(msg);
-      else setAiError(msg);
-    } finally {
-      if (isLong) setLongAiLoading(false);
-      else setAiLoading(false);
-    }
-  }, [draft.honorific, draft.name, selectedPurpose]);
-
-  useEffect(() => {
-    setAiMessages([]); setAiError(null); setAiFallback(false);
-    setLongAiMessages([]); setLongAiError(null);
-  }, [draft.honorific, draft.name, selectedPurpose]);
 
   useEffect(() => {
     if (!honorificOptions.includes(draft.honorific)) {
@@ -2162,35 +2136,6 @@ export function MessageScreen() {
           ) : (
             <div className="mt-3 space-y-2">
 
-              {/* 단문 AI 버튼 */}
-              {length === "short" && shortMode === "ai" && (
-                <div className="rounded-xl border border-orange-100 bg-orange-50/50 p-3">
-                  <button onClick={() => fetchAiMessages(false)} disabled={aiLoading}
-                    className="h-11 w-full rounded-lg bg-[#7b310d] text-sm font-bold text-white disabled:bg-stone-300">
-                    {aiLoading ? "AI가 문구를 만드는 중..." : aiMessages.length > 0 ? "다시 만들기" : "AI 문구 만들기"}
-                  </button>
-                  {aiFallback && <p className="mt-2 text-xs font-semibold text-stone-500">AI 연결이 불안정해 기본 추천 문구를 보여드렸어요.</p>}
-                  {aiError && <p className="mt-2 text-xs font-semibold text-red-600">{aiError}</p>}
-                </div>
-              )}
-              {length === "short" && shortMode === "ai" && !aiLoading && aiMessages.length === 0 && (
-                <div className="rounded-md border border-dashed border-stone-200 px-4 py-8 text-center text-sm font-semibold text-stone-500">버튼을 눌러 맞춤 문구를 생성하세요.</div>
-              )}
-
-              {/* 장문 AI 버튼 */}
-              {length === "long" && longMode === "long_ai" && (
-                <div className="rounded-xl border border-orange-100 bg-orange-50/50 p-3">
-                  <button onClick={() => fetchAiMessages(true)} disabled={longAiLoading}
-                    className="h-11 w-full rounded-lg bg-[#7b310d] text-sm font-bold text-white disabled:bg-stone-300">
-                    {longAiLoading ? "AI가 장문을 만드는 중..." : longAiMessages.length > 0 ? "다시 만들기" : "AI 장문 만들기"}
-                  </button>
-                  {longAiError && <p className="mt-2 text-xs font-semibold text-red-600">{longAiError}</p>}
-                </div>
-              )}
-              {length === "long" && longMode === "long_ai" && !longAiLoading && longAiMessages.length === 0 && (
-                <div className="rounded-md border border-dashed border-stone-200 px-4 py-8 text-center text-sm font-semibold text-stone-500">버튼을 눌러 맞춤 장문을 생성하세요.</div>
-              )}
-
               {/* 단문 메시지 목록 */}
               {length === "short" && shortMode === "recommend" && (
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2236,22 +2181,6 @@ export function MessageScreen() {
                   ))}
                 </div>
               )}
-              {length === "short" && shortMode === "ai" && aiMessages.length > 0 && (
-                <div className="space-y-2">
-                  {aiMessages.map((msg) => (
-                    <div key={msg} className={`flex items-center gap-2 rounded-md border ${draft.message === msg ? "border-[#d98238] bg-orange-50" : "border-stone-200"}`}>
-                      <button onClick={() => setDraft({ message: msg, messageOrigin: "ai", contentRotation: undefined })} className="flex flex-1 items-center gap-2 p-3 text-left text-sm leading-6">
-                        <Heart size={16} className={`shrink-0 ${draft.message === msg ? "fill-[#d98238] text-[#d98238]" : "text-stone-300"}`} />
-                        <span>{msg}</span>
-                      </button>
-                      <button onClick={() => toggleFavMsg(msg, selectedPurpose)} className="shrink-0 p-3" aria-label="즐겨찾기">
-                        <Bookmark size={16} className={isFavSaved(msg) ? "fill-[#7b310d] text-[#7b310d]" : "text-stone-300"} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* 장문 메시지 목록 */}
               {length === "long" && longMode === "long_recommend" && (
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2273,7 +2202,7 @@ export function MessageScreen() {
               {length === "long" && longMode === "long_recommend" && recommendCategory === "mine" && myMessagesPanel}
 
               {length === "long" && longMode === "long_recommend" && recommendCategory !== "mine" && (
-                <div className="mt-4 space-y-4">
+                <div className="mt-4 max-h-[50vh] space-y-4 overflow-y-auto overscroll-contain pr-1">
                   {longRecommendGroups.map((group) => (
                     <div key={group.purpose}>
                       <div className="mb-2 flex items-center justify-between">
@@ -2303,28 +2232,6 @@ export function MessageScreen() {
                   ))}
                 </div>
               )}
-              {length === "long" && longMode === "long_ai" && longAiMessages.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  {longAiMessages.map((msg) => (
-                    <div key={msg} className={`rounded-xl border p-4 ${draft.message === msg ? "border-[#d98238] bg-orange-50" : "border-stone-200 bg-white"}`}>
-                      <p className="whitespace-pre-line text-sm leading-7 text-stone-700">{msg}</p>
-                      <div className="mt-3 flex items-center justify-between">
-                        <button onClick={() => toggleFavMsg(msg, selectedPurpose)} className="flex items-center gap-1 text-xs font-bold text-stone-400" aria-label="즐겨찾기">
-                          <Bookmark size={13} className={isFavSaved(msg) ? "fill-[#7b310d] text-[#7b310d]" : ""} />
-                          {isFavSaved(msg) ? "저장됨" : "저장"}
-                        </button>
-                        <button
-                          onClick={() => setDraft({ message: msg, messageOrigin: "ai", contentRotation: undefined })}
-                          className={`rounded-md px-4 py-1.5 text-xs font-bold ${draft.message === msg ? "bg-[#7b310d] text-white" : "border border-[#7b310d] text-[#7b310d]"}`}
-                        >
-                          {draft.message === msg ? "선택됨 ✓" : "이 글로 카드 만들기"}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* 손편지 메시지 목록 */}
               {length === "hand" && (handMode === "hand_recommend" || handMode === "direct") &&
                 handMessages.map((msg) => (
@@ -2612,8 +2519,7 @@ export function BackgroundScreen() {
                       onClick={() => setDraft({ bg: bg.url })}
                       className={`relative aspect-[3/4] overflow-hidden rounded-xl ${selected ? "ring-4 ring-[#7b310d]" : ""}`}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={bg.url} alt={bg.name} className="h-full w-full object-cover" />
+                      <SmoothImage src={bg.url} alt={bg.name} className="h-full w-full object-cover" />
                       {selected && (
                         <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[#7b310d] text-white">
                           <Check size={13} />
@@ -2669,8 +2575,7 @@ export function BackgroundScreen() {
           {aiUrl && !aiLoading && (
             <div className="space-y-3">
               <div className="relative overflow-hidden rounded-xl aspect-[3/4]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={aiUrl} alt="AI 생성 배경" className="h-full w-full object-cover" />
+                <SmoothImage src={aiUrl} alt="AI 생성 배경" className="h-full w-full object-cover" />
                 {draft.bg === `ai:${aiUrl}` && (
                   <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-[#7b310d] text-white">
                     <Check size={16} />
@@ -2708,8 +2613,7 @@ export function BackgroundScreen() {
         {(wsPreviewSrc || wsPreviewSwatch) && (
           <div className="relative mx-auto mt-3 aspect-[2/3] w-44 overflow-hidden rounded-lg ring-1 ring-stone-200">
             {wsPreviewSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={wsPreviewSrc} alt="배경 미리보기" className="h-full w-full object-cover" />
+              <SmoothImage src={wsPreviewSrc} alt="배경 미리보기" className="h-full w-full object-cover" />
             ) : (
               <div className={`h-full w-full bg-gradient-to-br ${wsPreviewSwatch}`} />
             )}
@@ -2754,8 +2658,12 @@ export function PreviewScreen() {
   const [draft, setDraft, draftHydrated] = useDraft();
   const [adjTab, setAdjTab] = useState<"title" | "content" | "footer">("title");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
+
   const { addCard } = useSupabaseCards();
   const uiSettings = usePublicUiSettings();
+  const enabledFonts = uiSettings.enabled_fonts && uiSettings.enabled_fonts.length > 0
+    ? CARD_FONTS.filter((f) => uiSettings.enabled_fonts!.includes(f.id))
+    : CARD_FONTS;
   const { hand_paper_enabled, hand_paper_style } = uiSettings;
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -2766,6 +2674,9 @@ export function PreviewScreen() {
   const [showDebug, setShowDebug] = useState(false);
   const [typographyReady, setTypographyReady] = useState(false);
   const [whitespaceReady, setWhitespaceReady] = useState(false);
+  // 텍스트 측정 기반 위치 보정이 끝났는지 여부. 보정 전까지 카드를 숨겨
+  // "배치 후 위치조정" 점프가 보이지 않도록 한다.
+  const [layoutSettled, setLayoutSettled] = useState(false);
   const [previewWsRegion, setPreviewWsRegion] = useState<WsRegion | null>(null);
   const [showTextBoxes, setShowTextBoxes] = useState(true);
   const [selectedTextBoxPart, setSelectedTextBoxPart] = useState<PreviewTextPart | null>("title");
@@ -2785,6 +2696,7 @@ export function PreviewScreen() {
   } | null>(null);
   const inlineEditorRef = useRef<HTMLDivElement>(null);
   const inlineEditingValueRef = useRef("");
+  const pendingInlineEditsRef = useRef<Partial<Record<PreviewTextPart, string>>>({});
   const cardPreviewRef = useRef<HTMLDivElement>(null);
   const previewTextRefs = useRef<Partial<Record<PreviewTextPart, HTMLDivElement>>>({});
   const draftRef = useRef(draft);
@@ -2892,8 +2804,14 @@ export function PreviewScreen() {
     };
   }, [previewWsRegion]);
 
-  const createCardImage = useCallback(async (useAI = false, mode?: "sub" | "pay", signal?: AbortSignal, omitTextPart?: PreviewTextPart): Promise<{ url: string; blob: Blob; boxes: DefaultTextBoxes; textMetrics: PreviewTextMetrics | null }> => {
-    const d = draftRef.current;
+  const createCardImage = useCallback(async (
+    useAI = false,
+    mode?: "sub" | "pay",
+    signal?: AbortSignal,
+    omitTextPart?: PreviewTextPart,
+    sourceDraft?: Draft,
+  ): Promise<{ url: string; blob: Blob; boxes: DefaultTextBoxes; textMetrics: PreviewTextMetrics | null }> => {
+    const d = sourceDraft ?? draftRef.current;
     const recommendedTypography = getRecommendedTypography(d);
     const resolvedBoxes = getResolvedTextBoxes(d);
     // 하단 메세지 + 작성자 → 카드 하단 추가 문구
@@ -2924,7 +2842,7 @@ export function PreviewScreen() {
           position: d.cardPosition,
           title_scale: d.titleScale ?? recommendedTypography.titleScale,
           content_scale: d.contentScale ?? recommendedTypography.contentScale,
-          footer_scale: d.footerScale ?? 1,
+          footer_scale: d.footerScale ?? DEFAULT_FOOTER_SCALE,
           title_color: d.titleColor,
           content_color: d.contentColor,
           footer_color: d.footerColor,
@@ -2937,6 +2855,9 @@ export function PreviewScreen() {
           content_rotation: d.contentRotation ?? 0,
           footer_rotation: d.footerRotation ?? 0,
           omit_text_part: omitTextPart,
+          title_bold: d.titleBold,
+          content_bold: d.contentBold,
+          footer_bold: d.footerBold,
       }),
       signal,
     });
@@ -2997,25 +2918,45 @@ export function PreviewScreen() {
 
   const finalizeCard = useCallback(async (destination?: "/library") => {
     if (finalizing) return;
+    let finalDraft = {
+      ...readJson<Draft>(draftStorageKey, draftRef.current),
+      ...draftRef.current,
+    };
+    const pendingEdits = { ...pendingInlineEditsRef.current };
     if (inlineEditingPart) {
-      const value = inlineEditingValueRef.current;
-      const update: Partial<Draft> = inlineEditingPart === "title"
-        ? { title: value }
-        : inlineEditingPart === "footer"
-          ? { footer: value }
-          : { message: value, messageOrigin: "direct" };
-      draftRef.current = { ...draftRef.current, ...update };
-      setDraft(update);
-      setInlineEditingPart(null);
+      pendingEdits[inlineEditingPart] = inlineEditorRef.current
+        ? readEditableText(inlineEditorRef.current)
+        : inlineEditingValueRef.current;
     }
+    const pendingUpdate: Partial<Draft> = {};
+    if (pendingEdits.title !== undefined) pendingUpdate.title = pendingEdits.title;
+    if (pendingEdits.footer !== undefined) pendingUpdate.footer = pendingEdits.footer;
+    if (pendingEdits.content !== undefined) {
+      pendingUpdate.message = pendingEdits.content;
+      pendingUpdate.messageOrigin = "direct";
+    }
+    finalDraft = { ...finalDraft, ...pendingUpdate };
+    if (Object.keys(pendingUpdate).length > 0) setDraft(pendingUpdate);
+    setInlineEditingPart(null);
+    draftRef.current = finalDraft;
+    writeJson(draftStorageKey, finalDraft);
     setFinalizing(true);
     try {
-      const { blob } = await createCardImage(useAi, useAi ? "sub" : undefined);
-      const cardId = await addCard(draftRef.current, blob);
+      const { blob } = await createCardImage(
+        useAi,
+        useAi ? "sub" : undefined,
+        undefined,
+        undefined,
+        finalDraft,
+      );
+      const cardId = await addCard(finalDraft, blob);
+      pendingInlineEditsRef.current = {};
       if (destination) router.push(destination);
       return cardId;
-    } catch {
-      window.alert("카드 완성에 실패했습니다.");
+    } catch (error) {
+      console.error("카드 보관함 저장 실패:", error);
+      const message = error instanceof Error ? error.message : "알 수 없는 오류";
+      window.alert(`카드 저장에 실패했습니다.\n${message}`);
       return null;
     } finally {
       setFinalizing(false);
@@ -3060,7 +3001,7 @@ export function PreviewScreen() {
     const currentDraft = draftRef.current;
     const typography = getRecommendedTypography(currentDraft);
     const key = part === "title" ? "titleScale" : part === "footer" ? "footerScale" : "contentScale";
-    const fallback = part === "title" ? typography.titleScale : part === "footer" ? 1 : typography.contentScale;
+    const fallback = part === "title" ? typography.titleScale : part === "footer" ? DEFAULT_FOOTER_SCALE : typography.contentScale;
     const current = (currentDraft[key] as number | undefined) ?? fallback;
     const nextScale = Math.round(clampRange(current + delta, 0.6, 1.8) * 20) / 20;
     if (nextScale === current) return;
@@ -3153,6 +3094,7 @@ export function PreviewScreen() {
       : part === "content" ? currentDraft.message ?? ""
       : currentDraft.footer ?? "";
     inlineEditingValueRef.current = initialText;
+    pendingInlineEditsRef.current[part] = initialText;
     setInlineEditingInitialText(initialText);
     setInlineEditingPart(part);
     window.requestAnimationFrame(() => {
@@ -3188,9 +3130,20 @@ export function PreviewScreen() {
   const endInlineEditing = useCallback(() => {
     const part = inlineEditingPart;
     const value = inlineEditingValueRef.current;
-    if (part === "title") setDraft({ title: value });
-    else if (part === "footer") setDraft({ footer: value });
-    else if (part === "content") setDraft({ message: value, messageOrigin: "direct" });
+    const update: Partial<Draft> = part === "title"
+      ? { title: value }
+      : part === "footer"
+        ? { footer: value }
+        : part === "content"
+          ? { message: value, messageOrigin: "direct" }
+          : {};
+    if (part) {
+      const nextDraft = { ...draftRef.current, ...update };
+      draftRef.current = nextDraft;
+      writeJson(draftStorageKey, nextDraft);
+      pendingInlineEditsRef.current[part] = value;
+      setDraft(update);
+    }
     setInlineEditingPart(null);
   }, [inlineEditingPart, setDraft]);
 
@@ -3368,6 +3321,8 @@ export function PreviewScreen() {
     const part = hit?.part ?? adjTab;
     const box = hit?.box ?? getPartTextBox(currentDraft, part);
     if (part !== adjTab) setAdjTab(part);
+
+    
     areaDragStartRef.current = { mode: "move", part, point, box };
   }, [adjTab, endInlineEditing, getHorizontalResizeHandle, getPartRotation, getPartTextBox, getTextAreaPoint, getVerticalResizeHandle, inlineEditingPart, isNearRotateHandle, pushUndoSnapshot, selectedTextBoxPart, useAi]);
 
@@ -3520,8 +3475,17 @@ export function PreviewScreen() {
       if (cancelled || !cardPreviewRef.current) return;
       const previewRect = cardPreviewRef.current.getBoundingClientRect();
       if (!previewRect.width || !previewRect.height) return;
+      // 측정 가능한 시점 도달 → 아래 setDraft(보정)와 같은 커밋으로 묶여
+      // 카드가 처음 보일 때 이미 확정된 위치로 렌더된다.
+      if (!cancelled) setLayoutSettled(true);
 
-      const visibleParts = previewTextBoxes.map(({ part }) => part);
+      const visibleParts: PreviewTextPart[] = [
+        ...(draftRef.current.title?.trim() ? ["title" as const] : []),
+        "content",
+        ...(draftRef.current.footer?.trim() || (draftRef.current.authorEnabled && draftRef.current.author?.trim())
+          ? ["footer" as const]
+          : []),
+      ];
       const measured = visibleParts.map((part) => {
         const element = previewTextRefs.current[part];
         if (!element) return null;
@@ -3613,6 +3577,8 @@ export function PreviewScreen() {
     done,
     draft.contentFont,
     draft.contentScale,
+    draft.author,
+    draft.authorEnabled,
     draft.footer,
     draft.footerFont,
     draft.footerScale,
@@ -3623,8 +3589,19 @@ export function PreviewScreen() {
     getPartTextBox,
     inlineEditingPart,
     previewWsRegion,
+    availableTextBox.x0,
+    availableTextBox.x1,
+    availableTextBox.y0,
+    availableTextBox.y1,
     setDraft,
   ]);
+
+  // 폴백: 측정이 끝나지 않아도 done 이후 일정 시간이 지나면 카드를 표시.
+  useEffect(() => {
+    if (!done || layoutSettled) return;
+    const timer = window.setTimeout(() => setLayoutSettled(true), 600);
+    return () => window.clearTimeout(timer);
+  }, [done, layoutSettled]);
 
   if (!done) {
     const sparkles = ["✨", "💫", "🌸", "💌", "🌟", "✿"];
@@ -3704,7 +3681,7 @@ export function PreviewScreen() {
       {cardImageUrl ? (
         <div
           ref={cardPreviewRef}
-          className={`relative overflow-hidden rounded-2xl shadow-lg ${!useAi ? "cursor-move touch-none ring-2 ring-[#7b310d]/40" : ""}`}
+          className={`relative overflow-hidden rounded-2xl shadow-lg transition-opacity duration-200 ${layoutSettled ? "opacity-100" : "opacity-0"} ${!useAi ? "cursor-move touch-none ring-2 ring-[#7b310d]/40" : ""}`}
           tabIndex={useAi ? undefined : 0}
           role={useAi ? undefined : "button"}
           aria-label={useAi ? undefined : "카드 미리보기. 텍스트 박스를 더블클릭하거나 Enter를 누르면 문구를 수정할 수 있습니다."}
@@ -3729,8 +3706,6 @@ export function PreviewScreen() {
                 ? draft.footerFont ?? draft.contentFont ?? typography.contentFont
                 : draft.contentFont ?? typography.contentFont;
             const inlineFontFamily = CARD_FONTS.find((font) => font.id === inlineFontId)?.family;
-            const fontKey = part === "title" ? "titleFont" : part === "footer" ? "footerFont" : "contentFont";
-            const colorKey = part === "title" ? "titleColor" : part === "footer" ? "footerColor" : "contentColor";
             const inlineColor = part === "title"
               ? draft.titleColor && draft.titleColor !== "auto" ? draft.titleColor : "#6f2f18"
               : part === "footer"
@@ -3745,7 +3720,7 @@ export function PreviewScreen() {
               color: inlineColor,
               fontFamily: inlineFontFamily,
               fontSize: `${inlineFontSize}px`,
-              fontWeight: 400,
+              fontWeight: (part === "title" ? draft.titleBold : part === "footer" ? draft.footerBold : draft.contentBold) ? 700 : 400,
               boxSizing: "border-box" as const,
               width: "100%",
               height: "100%",
@@ -3769,30 +3744,6 @@ export function PreviewScreen() {
                 : part === "content"
                   ? active ? "bg-[#1f6f78] text-white" : "bg-[#1f6f78] text-white"
                   : active ? "bg-[#6f3cc3] text-white" : "bg-[#6f3cc3] text-white";
-            const boxWidth = Math.max(0.08, box.x1 - box.x0);
-            const boxHeight = Math.max(0.08, box.y1 - box.y0);
-            const previewWidthPx = Math.max(320, CARD_PREVIEW_WIDTH * cardPreviewScale);
-            const previewHeightPx = Math.max(480, CARD_PREVIEW_HEIGHT * cardPreviewScale);
-            const quickToolWidthPx = Math.min(264, previewWidthPx - 16);
-            const quickToolHeightPx = 58;
-            const quickToolWidthRatio = quickToolWidthPx / previewWidthPx;
-            const quickToolHeightRatio = quickToolHeightPx / previewHeightPx;
-            const quickToolGapX = 8 / previewWidthPx;
-            const quickToolGapY = 8 / previewHeightPx;
-            const rightSpace = 1 - box.x1;
-            const leftSpace = box.x0;
-            const quickToolX = rightSpace >= quickToolWidthRatio + quickToolGapX
-              ? box.x1 + quickToolGapX
-              : leftSpace >= quickToolWidthRatio + quickToolGapX
-                ? box.x0 - quickToolWidthRatio - quickToolGapX
-                : clampRange(box.x0, quickToolGapX, 1 - quickToolWidthRatio - quickToolGapX);
-            const quickToolY = clampRange(
-              box.y0,
-              quickToolGapY,
-              1 - quickToolHeightRatio - quickToolGapY,
-            );
-            const quickToolLeftPercent = ((quickToolX - box.x0) / boxWidth) * 100;
-            const quickToolTopPercent = ((quickToolY - box.y0) / boxHeight) * 100;
             return (
               <div
                 key={part}
@@ -3812,89 +3763,7 @@ export function PreviewScreen() {
                     {label}
                   </span>
                 )}
-                {active && (
-                  <div
-                    className="pointer-events-auto absolute z-30 flex items-center gap-2 rounded-2xl border-2 border-white bg-white/95 p-1.5 shadow-xl backdrop-blur"
-                    style={{
-                      left: `${quickToolLeftPercent}%`,
-                      top: `${quickToolTopPercent}%`,
-                      width: `${quickToolWidthPx}px`,
-                      transform: `rotate(${-rotation}deg)`,
-                      transformOrigin: "center",
-                    }}
-                    onPointerDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    onDoubleClick={(event) => {
-                      event.stopPropagation();
-                    }}
-                  >
-                    <label
-                      className="relative grid h-11 w-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-white shadow-md transition hover:scale-105"
-                      title={`${label} 글자색`}
-                      style={{
-                        background: "conic-gradient(from 45deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #af52de, #ff2d55, #ff3b30)",
-                      }}
-                    >
-                      <input
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                        aria-label={`${label} 직접 색상 선택`}
-                        type="color"
-                        value={inlineColor}
-                        onChange={(event) => {
-                          setDraftWithUndo({ [colorKey]: event.target.value });
-                        }}
-                      />
-                      <span
-                        className="pointer-events-none h-5 w-5 rounded-full border-[3px] border-white shadow-[0_1px_4px_rgba(0,0,0,0.45)]"
-                        style={{ backgroundColor: inlineColor }}
-                      />
-                    </label>
-                    <label className="relative flex h-11 min-w-0 flex-1 items-center rounded-xl border-2 border-stone-200 bg-white pl-3 shadow-sm">
-                      <Type size={18} className="pointer-events-none shrink-0 text-[#7b310d]" />
-                      <select
-                        aria-label={`${label} 글씨체 선택`}
-                        value={inlineFontId}
-                        onChange={(event) => {
-                          setDraftWithUndo({ [fontKey]: event.target.value });
-                        }}
-                        className="h-full min-w-0 flex-1 cursor-pointer appearance-none bg-transparent px-2 pr-7 text-base font-black text-stone-800 outline-none"
-                        style={{ fontFamily: inlineFontFamily }}
-                      >
-                        {CARD_FONTS.map((font) => (
-                          <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>
-                            {font.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={18} strokeWidth={3} className="pointer-events-none absolute right-2 text-[#7b310d]" />
-                    </label>
-                    <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-xl border-2 border-stone-200 bg-white shadow-sm">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          adjustPartFontScale(part, -0.05);
-                        }}
-                        className="grid h-full w-8 place-items-center text-lg font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
-                        aria-label={`${label} 글씨 작게`}
-                      >
-                        −
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          adjustPartFontScale(part, 0.05);
-                        }}
-                        className="grid h-full w-8 place-items-center border-l border-stone-200 text-lg font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
-                        aria-label={`${label} 글씨 크게`}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                )}
+
                 {active && (part === "title" || part === "footer") && (
                   <button
                     type="button"
@@ -3933,6 +3802,15 @@ export function PreviewScreen() {
                         const maxLength = part === "title" ? 20 : part === "footer" ? 40 : 500;
                         const value = readEditableText(event.currentTarget).slice(0, maxLength);
                         inlineEditingValueRef.current = value;
+                        pendingInlineEditsRef.current[part] = value;
+                        const update: Partial<Draft> = part === "title"
+                          ? { title: value }
+                          : part === "footer"
+                            ? { footer: value }
+                            : { message: value, messageOrigin: "direct" };
+                        const nextDraft = { ...draftRef.current, ...update };
+                        draftRef.current = nextDraft;
+                        writeJson(draftStorageKey, nextDraft);
                       }}
                       onBlur={endInlineEditing}
                       onKeyDown={(event) => {
@@ -3988,6 +3866,160 @@ export function PreviewScreen() {
               </div>
             );
           })}
+          
+          {/* Quick Typography Tool (Rendered as a sibling to prevent text box boundary and rotation conflicts) */}
+          {showTextBoxes && selectedTextBoxPart && !useAi && (() => {
+            const activeTextBox = previewTextBoxes.find((tb) => tb.part === selectedTextBoxPart);
+            if (!activeTextBox) return null;
+            const { part, box, label } = activeTextBox;
+            
+            const typography = getRecommendedTypography(draft);
+            const inlineFontId = part === "title"
+              ? draft.titleFont ?? typography.titleFont
+              : part === "footer"
+                ? draft.footerFont ?? draft.contentFont ?? typography.contentFont
+                : draft.contentFont ?? typography.contentFont;
+            const inlineFontFamily = CARD_FONTS.find((font) => font.id === inlineFontId)?.family;
+            const fontKey = part === "title" ? "titleFont" : part === "footer" ? "footerFont" : "contentFont";
+            const colorKey = part === "title" ? "titleColor" : part === "footer" ? "footerColor" : "contentColor";
+            const inlineColor = part === "title"
+              ? draft.titleColor && draft.titleColor !== "auto" ? draft.titleColor : "#6f2f18"
+              : part === "footer"
+                ? draft.footerColor && draft.footerColor !== "auto"
+                  ? draft.footerColor
+                  : draft.contentColor && draft.contentColor !== "auto" ? draft.contentColor : "#4a2412"
+                : draft.contentColor && draft.contentColor !== "auto" ? draft.contentColor : "#4a2412";
+
+            const previewWidthPx = Math.max(320, CARD_PREVIEW_WIDTH * cardPreviewScale);
+            const previewHeightPx = Math.max(480, CARD_PREVIEW_HEIGHT * cardPreviewScale);
+            const quickToolWidthPx = Math.min(312, previewWidthPx - 16);
+            const quickToolHeightPx = 52;
+            const quickToolWidthRatio = quickToolWidthPx / previewWidthPx;
+            const quickToolHeightRatio = quickToolHeightPx / previewHeightPx;
+            const quickToolGapX = 8 / previewWidthPx;
+            const quickToolGapY = 8 / previewHeightPx;
+            
+            const rightSpace = 1 - box.x1;
+            const leftSpace = box.x0;
+            const quickToolX = rightSpace >= quickToolWidthRatio + quickToolGapX
+              ? box.x1 + quickToolGapX
+              : leftSpace >= quickToolWidthRatio + quickToolGapX
+                ? box.x0 - quickToolWidthRatio - quickToolGapX
+                : clampRange(box.x0, quickToolGapX, 1 - quickToolWidthRatio - quickToolGapX);
+
+            const fitsAbove = box.y0 >= quickToolHeightRatio + quickToolGapY;
+            const fitsBelow = (1 - box.y1) >= quickToolHeightRatio + quickToolGapY;
+            const quickToolY = fitsAbove 
+              ? box.y0 - quickToolHeightRatio - quickToolGapY 
+              : fitsBelow 
+                ? box.y1 + quickToolGapY 
+                : (box.y0 > 0.5 
+                    ? quickToolGapY 
+                    : 1 - quickToolHeightRatio - quickToolGapY);
+
+            const isBoldVal = part === "title" ? draft.titleBold : part === "footer" ? draft.footerBold : draft.contentBold;
+
+            return (
+              <div
+                className="pointer-events-auto absolute z-30 flex items-center gap-1.5 rounded-full border border-white/25 bg-white/95 p-1.5 shadow-2xl backdrop-blur-md"
+                style={{
+                  left: `${quickToolX * 100}%`,
+                  top: `${quickToolY * 100}%`,
+                  width: `${quickToolWidthPx}px`,
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <label
+                  className="relative grid h-9 w-9 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border border-white/40 shadow-sm transition hover:scale-105"
+                  title={`${label} 글자색`}
+                  style={{
+                    background: "conic-gradient(from 45deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #af52de, #ff2d55, #ff3b30)",
+                  }}
+                >
+                  <input
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label={`${label} 직접 색상 선택`}
+                    type="color"
+                    value={inlineColor}
+                    onChange={(event) => {
+                      setDraftWithUndo({ [colorKey]: event.target.value });
+                    }}
+                  />
+                  <span
+                    className="pointer-events-none h-4.5 w-4.5 rounded-full border-[2.5px] border-white shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+                    style={{ backgroundColor: inlineColor }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDraftWithUndo({
+                      [part === "title" ? "titleBold" : part === "footer" ? "footerBold" : "contentBold"]: !isBoldVal
+                    });
+                  }}
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border transition hover:scale-105 active:scale-95 ${
+                    isBoldVal
+                      ? "border-[#7b310d] bg-[#7b310d]/10 text-[#7b310d]"
+                      : "border-stone-200 bg-white text-stone-500 hover:bg-stone-50"
+                  }`}
+                  title="글자 두껍게"
+                  aria-label="글자 두껍게 설정"
+                >
+                  <span className="text-sm font-black">B</span>
+                </button>
+                <label className="relative flex h-9 min-w-0 flex-1 items-center rounded-full border border-stone-200 bg-white pl-2.5 shadow-sm">
+                  <Type size={15} className="pointer-events-none shrink-0 text-[#7b310d]" />
+                  <select
+                    aria-label={`${label} 글씨체 선택`}
+                    value={inlineFontId}
+                    onChange={(event) => {
+                      setDraftWithUndo({ [fontKey]: event.target.value });
+                    }}
+                    className="h-full min-w-0 flex-1 cursor-pointer appearance-none bg-transparent px-1.5 pr-6 text-xs font-bold text-stone-800 outline-none"
+                    style={{ fontFamily: inlineFontFamily }}
+                  >
+                    {enabledFonts.map((font) => (
+                      <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>
+                        {font.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} strokeWidth={2.5} className="pointer-events-none absolute right-1.5 text-[#7b310d]" />
+                </label>
+                <div className="flex h-9 shrink-0 items-center overflow-hidden rounded-full border border-stone-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      adjustPartFontScale(part, -0.05);
+                    }}
+                    className="grid h-full w-7 place-items-center text-sm font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
+                    aria-label={`${label} 글씨 작게`}
+                  >
+                    −
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      adjustPartFontScale(part, 0.05);
+                    }}
+                    className="grid h-full w-7 place-items-center border-l border-stone-200 text-sm font-black text-[#5a240d] transition hover:bg-orange-50 active:bg-orange-100"
+                    aria-label={`${label} 글씨 크게`}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {!useAi && (
             <div className="pointer-events-none absolute inset-x-3 top-3 rounded-xl bg-white/85 px-3 py-2 text-center text-[11px] font-bold text-[#7b310d] shadow-sm backdrop-blur">
               BODY 좌우 손잡이로 가로 길이 조절 · 박스 드래그로 이동 · −/+로 글자 크기 조절
@@ -4039,7 +4071,7 @@ export function PreviewScreen() {
             <div className="min-h-0 overflow-hidden border-t border-stone-100">
           {/* 책갈피 탭 (최상단) — 제목/내용 각각 독립 편집 */}
           <div className="sticky top-0 z-20 grid grid-cols-3 gap-1.5 border-b border-stone-100 bg-white/95 px-3 py-2.5 backdrop-blur">
-            {([["title", "받는 사람", "Aa"], ["content", "내용", "¶"]] as const).map(([id, label, icon]) => {
+            {([["title", "받는 사람"], ["content", "내용"]] as const).map(([id, label]) => {
               const active = adjTab === id;
               return (
                 <button
@@ -4051,7 +4083,6 @@ export function PreviewScreen() {
                   }}
                   className={`flex h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-black transition ${active ? "bg-[#7b310d] text-white shadow-sm" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
                 >
-                  <span className="text-base">{icon}</span>
                   {label}
                 </button>
               );
@@ -4065,7 +4096,6 @@ export function PreviewScreen() {
               }}
               className={`flex h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-black transition ${adjTab === "footer" ? "bg-[#7b310d] text-white shadow-sm" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
             >
-              <span className="text-base">—</span>
               보내는 사람
             </button>
           </div>
@@ -4236,13 +4266,13 @@ export function PreviewScreen() {
                 {/* 글씨체 — 각 폰트를 실제 글씨체로 보여주는 세로 리스트 */}
                 <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-stone-500">글씨체 <span className="font-normal text-stone-400">({CARD_FONTS.length}종)</span></label>
+                    <label className="text-xs font-bold text-stone-500">글씨체 <span className="font-normal text-stone-400">({enabledFonts.length}종)</span></label>
                   </div>
                   <div className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-stone-200 bg-stone-50/50">
                     {(["손글씨", "명조", "고딕", "디자인"] as const).map((group) => (
                       <div key={group}>
                         <div className="sticky top-0 z-10 bg-stone-50 px-3 py-1 text-[10px] font-bold tracking-wide text-stone-400">{group}</div>
-                        {CARD_FONTS.filter((f) => f.group === group).map((f) => {
+                        {enabledFonts.filter((f) => f.group === group).map((f) => {
                           const active = fontVal === f.id;
                           return (
                             <button
@@ -4348,6 +4378,40 @@ export function PreviewScreen() {
                   />
                 </div>
 
+                {/* 글씨 두께 */}
+                <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
+                  <label className="text-xs font-bold text-stone-500">글씨 두께</label>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {([
+                      { id: false, label: "보통" },
+                      { id: true, label: "굵게" },
+                    ] as const).map((weightOpt) => {
+                      const isBold = editPart === "title" ? draft.titleBold : editPart === "footer" ? draft.footerBold : draft.contentBold;
+                      const active = Boolean(isBold) === weightOpt.id;
+                      return (
+                        <button
+                          type="button"
+                          key={weightOpt.label}
+                          onClick={() => {
+                            setShowTextBoxes(true);
+                            setSelectedTextBoxPart(editPart);
+                            setDraftWithUndo({
+                              [editPart === "title" ? "titleBold" : editPart === "footer" ? "footerBold" : "contentBold"]: weightOpt.id
+                            });
+                          }}
+                          className={`h-9 rounded-lg border text-xs font-bold transition ${
+                            active
+                              ? "border-[#7b310d] bg-orange-50 text-[#7b310d]"
+                              : "border-stone-200 bg-white text-stone-500 hover:bg-stone-50"
+                          }`}
+                        >
+                          {weightOpt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* 배치 (공통) */}
                 <div>
                   <label className="text-xs font-bold text-stone-500">글씨 배치 <span className="font-normal text-stone-400">(공통)</span></label>
@@ -4430,87 +4494,6 @@ export function PreviewScreen() {
         </div>
       )}
     </PhoneShell>
-  );
-}
-
-function ShareSheet({
-  onClose,
-  card,
-  cardId,
-  draft,
-}: {
-  onClose: () => void;
-  card: Pick<CardItem, "name" | "message">;
-  cardId: string | null;
-  draft: Draft;
-}) {
-  const [instaToast, setInstaToast] = useState(false);
-
-  const handleKakao = () => {
-    onClose();
-    shareCard({
-      recipientName: card.name,
-      honorific: draft.honorific || "에게",
-      message: card.message,
-      cardId: cardId ?? undefined,
-    });
-  };
-
-  const shareUrl = cardId
-    ? `${window.location.origin}/share/${cardId}`
-    : window.location.origin;
-
-  const handleInstagram = async () => {
-    const imgUrl = cardId ? `/api/card-image?cardId=${cardId}` : null;
-    if (imgUrl) {
-      const a = document.createElement("a");
-      a.href = imgUrl;
-      a.download = `maum-card-${cardId}.png`;
-      a.click();
-    }
-    setInstaToast(true);
-    setTimeout(() => setInstaToast(false), 3500);
-  };
-
-  const handleNaver = () => {
-    const title = encodeURIComponent(`${card.name}에게 보내는 마음 카드`);
-    const url = encodeURIComponent(shareUrl);
-    window.open(`https://share.naver.com/web/shareView?url=${url}&title=${title}`, "_blank");
-  };
-
-  const otherApps = [
-    ["N", "네이버", "bg-green-500 text-white", handleNaver],
-    ["f", "Facebook", "bg-blue-600 text-white", () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`)],
-    ["◎", "Instagram", "bg-pink-500 text-white", handleInstagram],
-    ["💬", "메시지", "bg-green-400", () => window.open(`sms:?body=${encodeURIComponent(shareUrl)}`)],
-    ["•••", "더보기", "bg-stone-100", () => navigator.share?.({ url: shareUrl }).catch(() => {})],
-  ] as const;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 px-4 pb-5">
-      {instaToast && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 rounded-xl bg-gray-900/90 px-5 py-3 text-center text-sm font-bold text-white shadow-lg">
-          이미지 저장 완료! 📸<br />
-          <span className="text-xs font-normal text-gray-300">Instagram 앱에서 스토리나 피드에 공유해보세요</span>
-        </div>
-      )}
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 text-center">
-        <h2 className="text-lg font-black">공유할 앱을 선택해주세요.</h2>
-        <div className="mt-7 grid grid-cols-3 gap-6">
-          <button onClick={handleKakao} className="grid place-items-center gap-2 text-sm font-bold">
-            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-yellow-300 text-lg font-black">TALK</span>
-            카카오톡
-          </button>
-          {otherApps.map(([mark, label, cls, handler]) => (
-            <button key={label} onClick={handler} className="grid place-items-center gap-2 text-sm font-bold">
-              <span className={`grid h-14 w-14 place-items-center rounded-2xl text-lg font-black ${cls}`}>{mark}</span>
-              {label}
-            </button>
-          ))}
-        </div>
-        <button onClick={onClose} className="mt-7 h-12 w-full rounded-md bg-stone-100 font-bold">취소</button>
-      </div>
-    </div>
   );
 }
 
@@ -4764,17 +4747,25 @@ export function LibraryScreen() {
         </div>
       )}
       {expandedCard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setExpandedCard(null)}>
-          <div className="relative w-full max-w-md" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(7vh,env(safe-area-inset-top))]"
+          onClick={() => setExpandedCard(null)}
+        >
+          <div
+            className="relative max-h-[calc(100dvh-9vh)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               onClick={() => setExpandedCard(null)}
-              className="absolute -right-2 -top-2 z-10 grid h-9 w-9 place-items-center rounded-full bg-white text-stone-800 shadow"
+              className="absolute right-2 top-2 z-20 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-stone-800 shadow"
               aria-label="닫기"
             >
               <X size={18} />
             </button>
-            <CardArt card={expandedCard} />
-            <div className="mt-3 rounded-xl bg-white px-4 py-3">
+            <div className="mx-auto max-h-[62dvh] overflow-hidden rounded-t-2xl">
+              <CardArt card={expandedCard} />
+            </div>
+            <div className="bg-white px-4 py-3">
               <div className="flex items-center justify-between">
                 <div className="font-black">{expandedCard.name}</div>
                 <button
@@ -4820,10 +4811,10 @@ export function LibraryScreen() {
                 </div>
               )}
             </div>
-            <div className="mt-2 flex gap-2">
+            <div className="flex gap-2 rounded-b-2xl bg-white px-4 pb-4">
               <button
                 onClick={async () => {
-                  const imgUrl = expandedCard.bg;
+                  const imgUrl = expandedCard.cardImageUrl;
                   if (!imgUrl) return;
                   if (navigator.share) {
                     try { await navigator.share({ title: expandedCard.name, url: imgUrl }); } catch { /* cancelled */ }
@@ -4848,7 +4839,7 @@ export function LibraryScreen() {
               </button>
               <button
                 onClick={async () => {
-                  const imgUrl = expandedCard.bg;
+                  const imgUrl = expandedCard.cardImageUrl;
                   if (!imgUrl) return;
                   try {
                     const res = await fetch(imgUrl);
@@ -5779,9 +5770,9 @@ export function AppBottomNav() {
   const items = [
     { href: "/", label: "홈", icon: Home },
     { href: "/anniversaries", label: "기념일", icon: CalendarDays },
-    { href: "/create/background", label: "카드 만들기", icon: Pencil },
+    { href: "/create/background", label: "만들기", icon: Pencil },
     { href: "/library", label: "보관함", icon: Folder },
-    { href: "/mypage", label: "마이페이지", icon: User },
+    { href: "/mypage", label: "마이", icon: User },
   ];
 
   return (
@@ -5793,13 +5784,13 @@ export function AppBottomNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1.5 py-1 text-center text-[11px] font-semibold leading-tight tracking-normal transition active:scale-95 sm:text-xs ${
+            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1.5 py-1.5 text-center text-xs font-black leading-tight tracking-normal transition active:scale-95 sm:text-sm ${
               active
                 ? "bg-secondary-container/40 text-primary"
-                : "text-on-surface-variant opacity-70 hover:bg-surface-variant/50"
+                : "text-on-surface-variant opacity-75 hover:bg-surface-variant/50"
             }`}
           >
-            <Icon size={20} strokeWidth={active ? 2.6 : 2} fill={active && href === "/" ? "currentColor" : "none"} />
+            <Icon size={22} strokeWidth={active ? 2.6 : 2} fill={active && href === "/" ? "currentColor" : "none"} />
             <span className="block w-full truncate">{label}</span>
           </Link>
         );

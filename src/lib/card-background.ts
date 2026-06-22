@@ -12,6 +12,7 @@ export const gradientMap: Record<string, { from: string; via: string; to: string
   spring: { from: "#ecfccb", via: "#f0f9ff", to: "#ffe4e6", accent: "#9fca72" },
   autumn: { from: "#fef9c3", via: "#ffedd5", to: "#fee2e2", accent: "#d98238" },
   winter: { from: "#f1f5f9", via: "#f0f9ff", to: "#dbeafe", accent: "#8fb6df" },
+  cosmic: { from: "#c3dafe", via: "#fbcfe8", to: "#fee2e2", accent: "#7c3aed" },
 };
 
 // bg 키별 강조색. AI/외부 배경은 기본 따뜻한 톤.

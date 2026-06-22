@@ -53,6 +53,40 @@ test("card image renderer preserves an explicit line break", async ({ request })
   expect(hash(lineBreakImage)).not.toBe(hash(spaceImage));
 });
 
+test("card image renderer applies the latest title", async ({ request }) => {
+  const [beforeResponse, afterResponse] = await Promise.all([
+    request.post("http://localhost:3003/api/card-image", {
+      data: { ...cardPayload, recipient_label: "수정 전 제목", message: "같은 본문" },
+    }),
+    request.post("http://localhost:3003/api/card-image", {
+      data: { ...cardPayload, recipient_label: "수정 후 제목", message: "같은 본문" },
+    }),
+  ]);
+
+  expect(beforeResponse.ok()).toBeTruthy();
+  expect(afterResponse.ok()).toBeTruthy();
+  const hash = (image: Buffer) => createHash("sha256").update(image).digest("hex");
+  expect(hash(await beforeResponse.body())).not.toBe(hash(await afterResponse.body()));
+});
+
+test("card image renderer applies title and footer edits together", async ({ request }) => {
+  const response = await request.post("http://localhost:3003/api/card-image", {
+    data: {
+      ...cardPayload,
+      recipient_label: "최종 제목",
+      message: "같은 본문",
+      sub_text: "최종 보내는 사람",
+      title_box: { x0: 0.2, y0: 0.15, x1: 0.8, y1: 0.28 },
+      footer_box: { x0: 0.45, y0: 0.72, x1: 0.85, y1: 0.82 },
+    },
+  });
+
+  expect(response.ok()).toBeTruthy();
+  const metrics = JSON.parse(decodeURIComponent(response.headers()["x-card-text-metrics"]));
+  expect(metrics.titleSize).toBeGreaterThan(0);
+  expect(metrics.footerSize).toBeGreaterThan(0);
+});
+
 test("contenteditable Enter stays at the cursor and is stored as a newline", async ({ page }) => {
   await page.setContent(`<div id="editor" contenteditable>첫 줄셋째 줄</div>`);
   const editor = page.locator("#editor");

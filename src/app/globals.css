@@ -59,57 +59,186 @@
   --shadow-level-2: 0 4px 16px -2px rgba(161, 61, 63, 0.18), 0 2px 6px rgba(161, 61, 63, 0.06);
 }
 
-:root[data-theme="garden"] {
-  --app-bg: #f4fbf6;
+:root[data-theme="silver-warm"] {
+  --app-bg: #fffdf9;
   --app-surface: #ffffff;
-  --app-surface-muted: #eaf7ec;
-  --app-brand: #176b4a;
-  --app-brand-strong: #0d4a33;
-  --app-brand-soft: #e7f5ee;
-  --app-brand-border: #49a078;
-  --app-ring: rgba(23, 107, 74, 0.22);
-  --app-primary-container: #9edfc1;
-  --app-on-primary-container: #073b28;
-  --app-secondary-container: #d9efe3;
-  --app-on-secondary-container: #245341;
-  --app-tertiary-container: #e7ecd0;
-  --app-on-tertiary-container: #3f4a25;
+  --app-surface-lowest: #ffffff;
+  --app-surface-low: #fbf7f0;
+  --app-surface-container: #f7ede2;
+  --app-surface-high: #f0e2d3;
+  --app-surface-highest: #e8d7c5;
+  --app-surface-muted: #f7ede2;
+  --app-text: #1a120b;
+  --app-text-muted: #5c4f43;
+  --app-brand: #8b2522;
+  --app-brand-strong: #5c1412;
+  --app-brand-soft: #fcebeb;
+  --app-brand-border: #d2a4a2;
+  --app-ring: rgba(139, 37, 34, 0.22);
+  --app-primary-container: #f9d8d6;
+  --app-on-primary-container: #5c1412;
+  --app-secondary-container: #fce8e6;
+  --app-on-secondary-container: #794341;
+  --app-tertiary-container: #f0e6df;
+  --app-on-tertiary-container: #4a3c31;
+  --app-outline: #8c7f76;
+  --app-outline-variant: #d2a4a2;
 }
 
-:root[data-theme="night"] {
-  --app-bg: #101418;
-  --app-surface: #181d23;
-  --app-surface-muted: #202832;
-  --app-text: #f8fafc;
-  --app-text-muted: #cbd5e1;
-  --app-brand: #6d7cff;
-  --app-brand-strong: #d9defd;
-  --app-brand-soft: #242b52;
-  --app-brand-border: #8c97ff;
-  --app-ring: rgba(109, 124, 255, 0.28);
-  --app-primary-container: #343f85;
-  --app-on-primary-container: #eef0ff;
-  --app-secondary-container: #293342;
-  --app-on-secondary-container: #d8e2f1;
-  --app-tertiary-container: #3a3348;
-  --app-on-tertiary-container: #eadff8;
+:root[data-theme="silver-contrast"] {
+  --app-bg: #090a0c;
+  --app-surface: #12141c;
+  --app-surface-lowest: #0c0d12;
+  --app-surface-low: #1a1d28;
+  --app-surface-container: #222736;
+  --app-surface-high: #2b3144;
+  --app-surface-highest: #353c52;
+  --app-surface-muted: #222736;
+  --app-text: #ffffff;
+  --app-text-muted: #e2e8f0;
+  --app-brand: #f59e0b;
+  --app-brand-strong: #ffffff;
+  --app-brand-soft: #2d2612;
+  --app-brand-border: #f59e0b;
+  --app-ring: rgba(245, 158, 11, 0.4);
+  --app-primary-container: #222736;
+  --app-on-primary-container: #ffffff;
+  --app-secondary-container: #1a1d28;
+  --app-on-secondary-container: #f59e0b;
+  --app-tertiary-container: #334155;
+  --app-on-tertiary-container: #ffffff;
+  --app-outline: #f59e0b;
+  --app-outline-variant: #f59e0b;
 }
 
-:root[data-theme="mono"] {
-  --app-bg: #f7f7f5;
+:root[data-theme="sophisticated"] {
+  --app-bg: #09080e;
+  --app-surface: #100f1a;
+  --app-surface-lowest: #0b0a12;
+  --app-surface-low: #151324;
+  --app-surface-container: #1a172e;
+  --app-surface-high: #221d3f;
+  --app-surface-highest: #2b2552;
+  --app-surface-muted: #1a172e;
+  --app-text: #f3f0ff;
+  --app-text-muted: #b4a8e6;
+  --app-brand: #8b5cf6;
+  --app-brand-strong: #c084fc;
+  --app-brand-soft: #231b3c;
+  --app-brand-border: #a78bfa;
+  --app-ring: rgba(139, 92, 246, 0.4);
+  --app-primary-container: #2e1065;
+  --app-on-primary-container: #f3e8ff;
+  --app-secondary-container: #1e1b4b;
+  --app-on-secondary-container: #e0e7ff;
+  --app-tertiary-container: #4c1d95;
+  --app-on-tertiary-container: #fae8ff;
+  --app-outline: #6d28d9;
+  --app-outline-variant: #a78bfa;
+}
+
+:root[data-theme="youth-mint"] {
+  --app-bg: #f2fbf5;
   --app-surface: #ffffff;
-  --app-surface-muted: #eeeeea;
-  --app-brand: #2f3437;
-  --app-brand-strong: #111315;
-  --app-brand-soft: #ececea;
-  --app-brand-border: #6b7280;
-  --app-ring: rgba(47, 52, 55, 0.2);
-  --app-primary-container: #d7d8d6;
-  --app-on-primary-container: #202325;
-  --app-secondary-container: #e8e8e5;
-  --app-on-secondary-container: #3f4244;
-  --app-tertiary-container: #dedbd2;
-  --app-on-tertiary-container: #3d3930;
+  --app-surface-lowest: #ffffff;
+  --app-surface-low: #e8f7ed;
+  --app-surface-container: #dcf2e3;
+  --app-surface-high: #cee9d6;
+  --app-surface-highest: #bedec7;
+  --app-surface-muted: #dcf2e3;
+  --app-text: #052e16;
+  --app-text-muted: #15803d;
+  --app-brand: #10b981;
+  --app-brand-strong: #047857;
+  --app-brand-soft: #ecfdf5;
+  --app-brand-border: #a7f3d0;
+  --app-ring: rgba(16, 185, 129, 0.22);
+  --app-primary-container: #a7f3d0;
+  --app-on-primary-container: #047857;
+  --app-secondary-container: #d1fae5;
+  --app-on-secondary-container: #065f46;
+  --app-tertiary-container: #ccfbf1;
+  --app-on-tertiary-container: #0f766e;
+  --app-outline: #34d399;
+  --app-outline-variant: #a7f3d0;
+}
+
+:root[data-theme="youth-peach"] {
+  --app-bg: #fffbf7;
+  --app-surface: #ffffff;
+  --app-surface-lowest: #ffffff;
+  --app-surface-low: #fff3e8;
+  --app-surface-container: #ffe8d6;
+  --app-surface-high: #ffd8bd;
+  --app-surface-highest: #ffc49e;
+  --app-surface-muted: #ffe8d6;
+  --app-text: #451a03;
+  --app-text-muted: #b45309;
+  --app-brand: #ff6b6b;
+  --app-brand-strong: #e11d48;
+  --app-brand-soft: #fff5f5;
+  --app-brand-border: #fecdd3;
+  --app-ring: rgba(255, 107, 107, 0.22);
+  --app-primary-container: #ffe4e6;
+  --app-on-primary-container: #9f1239;
+  --app-secondary-container: #ffedd5;
+  --app-on-secondary-container: #9a3412;
+  --app-tertiary-container: #fef3c7;
+  --app-on-tertiary-container: #78350f;
+  --app-outline: #fda4af;
+  --app-outline-variant: #fecdd3;
+}
+
+:root[data-theme="korean-palace"] {
+  --app-bg: #f7f5ee;
+  --app-surface: #f7f5ee;
+  --app-surface-lowest: #ffffff;
+  --app-surface-low: #efebe0;
+  --app-surface-container: #e8e4d8;
+  --app-surface-high: #dedacb;
+  --app-surface-highest: #d2cebe;
+  --app-surface-muted: #e8e4d8;
+  --app-text: #1a1c1e;
+  --app-text-muted: #4e5256;
+  --app-brand: #2a6e6b; /* Palace Cheongkiwa Teal */
+  --app-brand-strong: #9e3f3b; /* Dancheong Red */
+  --app-brand-soft: #efebe0;
+  --app-brand-border: #d69f3d; /* Dancheong Gold */
+  --app-ring: rgba(42, 110, 107, 0.22);
+  --app-primary-container: #d2e8e6;
+  --app-on-primary-container: #10302e;
+  --app-secondary-container: #e8e4d8;
+  --app-on-secondary-container: #2a6e6b;
+  --app-tertiary-container: #fae8ff;
+  --app-on-tertiary-container: #701a75;
+  --app-outline: #2a6e6b;
+  --app-outline-variant: #d69f3d;
+}
+
+:root[data-theme="gradient-cosmic"] {
+  --app-bg: linear-gradient(135deg, #1e1b4b, #3b0764, #83003f, #6b0000);
+  --app-surface: rgba(15, 10, 35, 0.72);
+  --app-surface-lowest: #060410;
+  --app-surface-low: rgba(22, 14, 48, 0.55);
+  --app-surface-container: rgba(32, 20, 68, 0.65);
+  --app-surface-high: rgba(45, 28, 92, 0.75);
+  --app-surface-highest: rgba(60, 38, 120, 0.85);
+  --app-surface-muted: rgba(32, 20, 68, 0.65);
+  --app-text: #ffffff;
+  --app-text-muted: #e4d6ff;
+  --app-brand: #d946ef;
+  --app-brand-strong: #ec4899;
+  --app-brand-soft: rgba(59, 7, 100, 0.35);
+  --app-brand-border: #f472b6;
+  --app-ring: rgba(217, 70, 239, 0.4);
+  --app-primary-container: #3b0764;
+  --app-on-primary-container: #fdf4ff;
+  --app-secondary-container: rgba(30, 27, 75, 0.8);
+  --app-on-secondary-container: #e0e7ff;
+  --app-tertiary-container: #4c1d95;
+  --app-on-tertiary-container: #fae8ff;
+  --app-outline: #c084fc;
+  --app-outline-variant: #f472b6;
 }
 
 @layer base {
@@ -366,14 +495,17 @@
   [data-theme] .text-stone-950,
   [data-theme] .text-stone-900,
   [data-theme] .text-stone-800,
-  [data-theme] .text-gray-900 {
+  [data-theme] .text-gray-900,
+  [data-theme] .text-gray-800 {
     color: var(--app-text);
   }
 
   [data-theme] .text-stone-700,
   [data-theme] .text-stone-600,
   [data-theme] .text-stone-500,
-  [data-theme] .text-gray-700 {
+  [data-theme] .text-gray-700,
+  [data-theme] .text-gray-600,
+  [data-theme] .text-gray-500 {
     color: var(--app-text-muted);
   }
 
@@ -405,4 +537,457 @@
   [data-theme] .hover\:text-\[\#7b310d\]:hover {
     color: var(--app-brand);
   }
+}
+
+/* Custom Font-scaling variables based on user preference */
+html {
+  --font-scale: 1;
+}
+html[data-font-size="normal"] {
+  --font-scale: 1;
+}
+html[data-font-size="large"] {
+  --font-scale: 1.15;
+}
+html[data-font-size="xlarge"] {
+  --font-scale: 1.30;
+}
+
+/* Custom Global Transitions and Font-scaling rules */
+html, body, .app-shell {
+  transition: background-color 0.3s ease, color 0.3s ease, font-size 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Base font-size calculation combining theme default and user preference */
+html[data-theme="silver-warm"] {
+  font-size: calc(19px * var(--font-scale)) !important;
+}
+html[data-theme="silver-contrast"] {
+  font-size: calc(20px * var(--font-scale)) !important;
+}
+html[data-theme="sophisticated"] {
+  font-size: calc(16px * var(--font-scale)) !important;
+}
+
+/* Enforce 12px minimum for small font utilities */
+.text-\[11px\],
+.text-xxs {
+  font-size: 12px !important;
+}
+
+html[data-theme="silver-warm"], body[data-theme="silver-warm"] {
+  background-color: #fffdf9 !important;
+}
+html[data-theme="silver-contrast"], body[data-theme="silver-contrast"] {
+  background-color: #090a0c !important;
+}
+html[data-theme="sophisticated"], body[data-theme="sophisticated"] {
+  background-color: #09080e !important;
+}
+
+/* === Theme Overrides for High Contrast (silver-contrast) === */
+[data-theme="silver-contrast"] .border-stone-200,
+[data-theme="silver-contrast"] .border-stone-100,
+[data-theme="silver-contrast"] .border-outline-variant\/30,
+[data-theme="silver-contrast"] .border-outline-variant\/20,
+[data-theme="silver-contrast"] .border-gray-100,
+[data-theme="silver-contrast"] .border-gray-200 {
+  border-width: 2px !important;
+  border-color: #f59e0b !important;
+}
+[data-theme="silver-contrast"] .bg-primary,
+[data-theme="silver-contrast"] .btn-primary-mobile,
+[data-theme="silver-contrast"] button[class*="bg-[#7b310d]"] {
+  background-color: #f59e0b !important;
+  color: #000000 !important;
+  font-weight: 900 !important;
+}
+[data-theme="silver-contrast"] .text-primary,
+[data-theme="silver-contrast"] .text-\[\#7b310d\] {
+  color: #f59e0b !important;
+}
+[data-theme="silver-contrast"] .text-\[\#5a240d\] {
+  color: #ffffff !important;
+}
+
+/* === Navigation bar readability overrides === */
+[data-theme="silver-contrast"] nav {
+  border-top: 3px solid #f59e0b !important;
+  background-color: #090a0c !important;
+}
+[data-theme="silver-contrast"] nav a[aria-current="page"] {
+  background-color: #f59e0b !important;
+  color: #000000 !important;
+}
+[data-theme="silver-contrast"] nav a {
+  opacity: 1 !important;
+}
+
+[data-theme="silver-warm"] nav {
+  background-color: #fbf7f0 !important;
+}
+[data-theme="silver-warm"] nav a[aria-current="page"] {
+  background-color: #fcd8d6 !important;
+  color: #8b2522 !important;
+}
+
+[data-theme="sophisticated"] nav {
+  border-top: 1px solid rgba(139, 92, 246, 0.3) !important;
+  background-color: rgba(16, 15, 26, 0.8) !important;
+  backdrop-filter: blur(12px) !important;
+}
+[data-theme="sophisticated"] nav a[aria-current="page"] {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(236, 72, 153, 0.2)) !important;
+  color: #c084fc !important;
+}
+
+/* === Theme Overrides for Sophisticated Modern (sophisticated) === */
+[data-theme="sophisticated"] .bg-white,
+[data-theme="sophisticated"] .bg-stone-50,
+[data-theme="sophisticated"] .bg-surface-container-low\/95 {
+  background-color: rgba(16, 15, 26, 0.75) !important;
+  backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(139, 92, 246, 0.25) !important;
+}
+[data-theme="sophisticated"] .btn-primary-mobile,
+[data-theme="sophisticated"] button[class*="bg-[#7b310d]"] {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+[data-theme="sophisticated"] .btn-primary-mobile:hover,
+[data-theme="sophisticated"] button[class*="bg-[#7b310d]"]:hover {
+  box-shadow: 0 0 25px rgba(236, 72, 153, 0.6) !important;
+  transform: translateY(-1px);
+}
+[data-theme="sophisticated"] .border-stone-200,
+[data-theme="sophisticated"] .border-stone-100,
+[data-theme="sophisticated"] .border-gray-100,
+[data-theme="sophisticated"] .border-gray-200 {
+  border-color: rgba(139, 92, 246, 0.15) !important;
+}
+[data-theme="sophisticated"] .text-\[\#5a240d\] {
+  color: #c084fc !important;
+  background: linear-gradient(135deg, #a78bfa, #ec4899);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* === Additional Youth Theme Body Backgrounds === */
+html[data-theme="youth-mint"], body[data-theme="youth-mint"] {
+  background-color: #f2fbf5 !important;
+}
+html[data-theme="youth-peach"], body[data-theme="youth-peach"] {
+  background-color: #fffbf7 !important;
+}
+
+/* === Sizing rules for youth themes === */
+html[data-theme="youth-mint"] {
+  font-size: calc(16px * var(--font-scale)) !important;
+}
+html[data-theme="youth-peach"] {
+  font-size: calc(16px * var(--font-scale)) !important;
+}
+
+/* === Navigation bar styling for youth themes === */
+[data-theme="youth-mint"] nav {
+  background-color: #e8f7ed !important;
+  border-top: 1px solid #a7f3d0 !important;
+}
+[data-theme="youth-mint"] nav a[aria-current="page"] {
+  background-color: #d1fae5 !important;
+  color: #047857 !important;
+}
+
+[data-theme="youth-peach"] nav {
+  background-color: #fff3e8 !important;
+  border-top: 1px solid #fecdd3 !important;
+}
+[data-theme="youth-peach"] nav a[aria-current="page"] {
+  background-color: #ffedd5 !important;
+  color: #9a3412 !important;
+}
+
+/* === Text Input and Form Elements Visibility Fix === */
+[data-theme] input,
+[data-theme] textarea,
+[data-theme] select {
+  background-color: var(--app-surface-low) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-brand-border) !important;
+}
+[data-theme] input::placeholder,
+[data-theme] textarea::placeholder {
+  color: var(--app-text-muted) !important;
+  opacity: 0.6;
+}
+
+[data-theme] select option {
+  background-color: var(--app-surface) !important;
+  color: var(--app-text) !important;
+}
+
+/* === Korean Palace Theme Styles === */
+html[data-theme="korean-palace"], body[data-theme="korean-palace"] {
+  background-color: #0f2e2d !important; /* Deep Cheongkiwa Teal outer background */
+}
+
+html[data-theme="korean-palace"] {
+  font-size: calc(16px * var(--font-scale)) !important;
+}
+
+/* Lattice pattern & Serif typography for palace theme wrapper */
+[data-theme="korean-palace"] .app-shell,
+[data-theme="korean-palace"] .theme-surface,
+[data-theme="korean-palace"] .bg-white,
+[data-theme="korean-palace"] .bg-stone-50 {
+  background-color: #f7f5ee !important;
+  background-image: 
+    linear-gradient(rgba(41, 104, 101, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(41, 104, 101, 0.05) 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+  font-family: var(--font-noto-serif), "Noto Serif KR", serif !important;
+}
+
+/* Palace double gold bordered buttons */
+[data-theme="korean-palace"] .btn-primary-mobile,
+[data-theme="korean-palace"] button[class*="bg-[#7b310d]"],
+[data-theme="korean-palace"] .bg-primary {
+  background: linear-gradient(135deg, #1c4d4a, #2a6e6b) !important;
+  color: #ffffff !important;
+  border: 3px double #d69f3d !important; /* Traditional royal double gold border! */
+  box-shadow: 0 4px 10px rgba(28, 77, 74, 0.3) !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.3) !important;
+  font-weight: 700 !important;
+  border-radius: 0.5rem !important; /* Traditional square-like rounded border */
+  font-family: var(--font-noto-serif), "Noto Serif KR", serif !important;
+}
+[data-theme="korean-palace"] .btn-primary-mobile:active,
+[data-theme="korean-palace"] button[class*="bg-[#7b310d]"]:active {
+  transform: scale(0.97) !important;
+}
+
+[data-theme="korean-palace"] .text-primary,
+[data-theme="korean-palace"] .text-\[\#7b310d\] {
+  color: #2a6e6b !important;
+  font-family: var(--font-noto-serif), "Noto Serif KR", serif !important;
+}
+[data-theme="korean-palace"] .text-\[\#5a240d\] {
+  color: #9e3f3b !important; /* Dancheong red for brand label */
+  font-family: var(--font-noto-serif), "Noto Serif KR", serif !important;
+}
+
+/* Palace bottom navigation styling */
+[data-theme="korean-palace"] nav {
+  background-color: #e8e4d8 !important;
+  border-top: 3px double #2a6e6b !important;
+  background-image: none !important; /* Remove pattern on nav */
+}
+[data-theme="korean-palace"] nav a[aria-current="page"] {
+  background-color: #2a6e6b !important;
+  color: #ffffff !important;
+  border-radius: 4px !important;
+}
+
+/* === Cosmic Gradient (Purple-Blue-Pink-Red) Theme === */
+html[data-theme="gradient-cosmic"], body[data-theme="gradient-cosmic"] {
+  background: linear-gradient(135deg, #2563eb, #7c3aed, #ec4899, #dc2626) !important;
+  background-size: 300% 300% !important;
+  animation: cosmicGradient 16s ease infinite !important;
+  background-attachment: fixed !important;
+}
+
+@keyframes cosmicGradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+[data-theme="gradient-cosmic"] .app-shell {
+  background: rgba(15, 10, 35, 0.76) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-theme="gradient-cosmic"] header,
+[data-theme="gradient-cosmic"] nav,
+[data-theme="gradient-cosmic"] .bg-white,
+[data-theme="gradient-cosmic"] .bg-white\/95 {
+  background: rgba(22, 14, 46, 0.8) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+[data-theme="gradient-cosmic"] .border-stone-200,
+[data-theme="gradient-cosmic"] .border-stone-100 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="gradient-cosmic"] input,
+[data-theme="gradient-cosmic"] textarea,
+[data-theme="gradient-cosmic"] select {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+[data-theme="gradient-cosmic"] input::placeholder,
+[data-theme="gradient-cosmic"] textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+[data-theme="gradient-cosmic"] .btn-primary-mobile,
+[data-theme="gradient-cosmic"] button[class*="bg-[#7b310d]"],
+[data-theme="gradient-cosmic"] .bg-primary {
+  background: linear-gradient(135deg, #7c3aed, #db2777) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4) !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="gradient-cosmic"] .text-stone-500,
+[data-theme="gradient-cosmic"] .text-stone-600,
+[data-theme="gradient-cosmic"] .text-on-surface-variant {
+  color: #c4b5fd !important;
+}
+
+[data-theme="gradient-cosmic"] .bg-stone-50,
+[data-theme="gradient-cosmic"] .bg-stone-100 {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+[data-theme="gradient-cosmic"] nav a[aria-current="page"] {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.3), rgba(219, 39, 119, 0.3)) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+html[data-theme="gradient-cosmic"] {
+  font-size: calc(16px * var(--font-scale)) !important;
+}
+
+/* === Unified styles for Design Settings Modal (ThemePanel) === */
+.theme-settings-panel {
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel h2 {
+  font-size: 16px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel h3 {
+  font-size: 13px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel p {
+  font-size: 11px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel button {
+  font-size: 13px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel button span {
+  font-size: 11px !important;
+}
+.theme-settings-panel button span.block.font-bold {
+  font-size: 13px !important;
+}
+.theme-settings-panel select,
+.theme-settings-panel select option {
+  font-size: 13px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+.theme-settings-panel span {
+  font-size: 12px !important;
+  font-family: var(--font-plus-jakarta-sans), var(--font-pretendard), system-ui, sans-serif !important;
+}
+
+/* === Cute and Bouncy Interactions === */
+
+/* Page transition slide-up pop animation */
+@keyframes cutePagePop {
+  0% {
+    opacity: 0;
+    transform: scale(0.975) translateY(16px);
+  }
+  60% {
+    transform: scale(1.004) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.cute-page-enter {
+  animation: cutePagePop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* 라우트 전환 크로스페이드 — 페이지 이동 시 전체 화면이 부드럽게 나타난다.
+   콘텐츠 자체의 pop(cute-page-enter)과 겹치지 않도록 opacity 위주로 가볍게 처리. */
+@keyframes routeFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.route-transition {
+  animation: routeFadeIn 0.32s ease-out both;
+  will-change: opacity, transform;
+}
+
+/* 모션 민감 사용자 배려: 애니메이션 최소화 */
+@media (prefers-reduced-motion: reduce) {
+  .route-transition,
+  .cute-page-enter {
+    animation: none;
+  }
+}
+
+/* Global button click spring animation (Respects admin toggle setting) */
+html[data-click-spring="true"] button:active,
+html[data-click-spring="true"] a:active,
+html[data-click-spring="true"] .cursor-pointer:active,
+html[data-click-spring="true"] [role="button"]:active {
+  transform: scale(0.94) rotate(0.4deg) !important;
+  transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.4) !important;
+}
+
+/* Sparkle/Bubble Click Particle Effect */
+@keyframes particlePop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(var(--scale-end)) rotate(180deg);
+    opacity: 0;
+  }
+}
+
+.cute-particle {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  user-select: none;
+  animation: particlePop 0.8s cubic-bezier(0.15, 0.85, 0.35, 1) forwards;
 }

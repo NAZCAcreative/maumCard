@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import type { Json } from "@/types/supabase";
 
 export interface CardInsertData {
   purpose: string;
@@ -8,6 +9,7 @@ export interface CardInsertData {
   background_id: string;
   is_ai_bg?: boolean;
   card_image_url?: string | null;
+  editor_state?: Json;
 }
 
 export async function saveCard(data: CardInsertData) {
@@ -15,19 +17,23 @@ export async function saveCard(data: CardInsertData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("로그인이 필요합니다.");
 
+  const payload = {
+    user_id: user.id,
+    purpose: data.purpose,
+    recipient: data.recipient,
+    honorific: data.honorific ?? "에게",
+    message: data.message,
+    background_id: data.background_id,
+    is_ai_bg: data.is_ai_bg ?? false,
+    card_image_url: data.card_image_url ?? null,
+    compose_mode: data.editor_state
+      ? `editor:${JSON.stringify(data.editor_state)}`
+      : "short",
+    share_token: crypto.randomUUID(),
+  };
   const { data: card, error } = await supabase
     .from("card_library")
-    .insert({
-      user_id: user.id,
-      purpose: data.purpose,
-      recipient: data.recipient,
-      honorific: data.honorific ?? "에게",
-      message: data.message,
-      background_id: data.background_id,
-      is_ai_bg: data.is_ai_bg ?? false,
-      card_image_url: data.card_image_url ?? null,
-      share_token: crypto.randomUUID(),
-    })
+    .insert(payload)
     .select()
     .single();
 

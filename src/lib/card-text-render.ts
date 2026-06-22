@@ -55,8 +55,8 @@ function estimateTextLines(text: string, fontSize: number, availW: number): numb
 
 function fitContentSize(availW: number, availH: number, text: string, lineHeight = 1.36, scale = 1): number {
   const len = text.replace(/\s/g, "").length;
-  const max = len <= 12 ? 156 : len <= 24 ? 142 : 128;
-  const min = 40;
+  const max = len <= 12 ? 190 : len <= 24 ? 170 : 150;
+  const min = 48;
   for (let fs = max; fs >= min; fs -= 2) {
     const lines = estimateTextLines(text, fs, availW);
     if (lines * fs * lineHeight <= availH) return fs * scale;
@@ -89,6 +89,9 @@ type RenderOpts = {
   contentRotation?: number;
   footerRotation?: number;
   omitTextPart?: "title" | "content" | "footer";
+  titleBold?: boolean;
+  contentBold?: boolean;
+  footerBold?: boolean;
   onMetrics?: (metrics: CardTextMetrics) => void;
 };
 
@@ -284,18 +287,15 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
     const footerBox = opts.footerBox ?? { x0, y0: Math.max(0.04, y1 - 0.08), x1, y1: Math.min(0.96, y1 + 0.08) };
     const titlePx = toPxBox(titleBox);
     const contentPx = toPxBox(contentBox);
-    const footerPx = toPxBox(footerBox);
     const titleAvailW = Math.max(140, titlePx.width - splitPadX * 2);
     const titleAvailH = Math.max(60, titlePx.height - splitPadY * 2);
     const contentAvailW = Math.max(140, contentPx.width - splitPadX * 2);
     const contentAvailH = Math.max(80, contentPx.height - splitPadY * 2);
-    const footerAvailW = Math.max(140, footerPx.width - splitPadX * 2);
-    const footerAvailH = Math.max(40, footerPx.height - splitPadY * 2);
     const splitContentSize = Math.round(fitContentSize(contentAvailW, contentAvailH, message, 1.36, contentScale));
     const splitTitleSize = hasTitle
       ? Math.round(Math.min(titleAvailH * 0.86, titleAvailW / Math.max(1.8, recipientLabel.length) * 1.35, splitContentSize * 2) * titleScale)
       : 0;
-    const splitFooterSize = subText ? Math.max(36, Math.round(Math.min(84, fitContentSize(footerAvailW, footerAvailH, subText, 1.28)) * 0.96 * footerScale)) : 0;
+    const splitFooterSize = subText ? Math.round(splitContentSize * footerScale) : 0;
     opts.onMetrics?.({
       titleSize: splitTitleSize,
       contentSize: splitContentSize,
@@ -337,6 +337,7 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
                   textShadow: titleShadow,
                   whiteSpace: "pre-wrap",
                   wordBreak: "keep-all",
+                  fontWeight: opts.titleBold ? 700 : 400,
                 }, opts.titleRotation ?? 0),
               ]
             : []),
@@ -349,6 +350,7 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
                 whiteSpace: "pre-wrap",
                 wordBreak: "keep-all",
                 textShadow: contentShadow,
+                fontWeight: opts.contentBold ? 700 : 400,
               }, opts.contentRotation ?? 0)]
             : []),
           ...(subText && opts.omitTextPart !== "footer"
@@ -363,6 +365,7 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
                   wordBreak: "keep-all",
                   textShadow: contentShadow,
                   opacity: 1,
+                  fontWeight: opts.footerBold ? 700 : 400,
                 }, opts.footerRotation ?? 0),
               ]
             : []),
@@ -458,6 +461,7 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
                   lineHeight: 1.18,
                   textAlign: "center",
                   textShadow: titleShadow,
+                  fontWeight: opts.titleBold ? 700 : 400,
                 },
                 children: multilineText(recipientLabel),
               },
@@ -480,6 +484,7 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
             whiteSpace: "pre-wrap",
             wordBreak: "keep-all",
             textShadow: contentShadow,
+            fontWeight: opts.contentBold ? 700 : 400,
           },
           children: multilineText(message),
         },

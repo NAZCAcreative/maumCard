@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isAdminUser } from "@/lib/adminAccess";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { CARD_FONTS } from "@/lib/card-fonts";
+
+const DEFAULT_ENABLED_FONTS = CARD_FONTS.map((f) => f.id);
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -14,9 +17,10 @@ async function requireAdmin() {
 }
 
 const SELECT_COLUMNS =
-  "signup_bonus_credits, ai_suggestions_enabled, ai_background_enabled, ai_compose_enabled, announcement_enabled, announcement_title, announcement_message, hand_font_round_enabled, hand_font_brush_enabled, hand_font_pen_enabled, hand_paper_enabled, hand_paper_style, hand_compose_font_size, hand_viewer_font_size, whitespace_test_enabled, updated_at";
+  "signup_bonus_credits, ai_suggestions_enabled, ai_background_enabled, ai_compose_enabled, announcement_enabled, announcement_title, announcement_message, hand_font_round_enabled, hand_font_brush_enabled, hand_font_pen_enabled, hand_paper_enabled, hand_paper_style, hand_compose_font_size, hand_viewer_font_size, whitespace_test_enabled, click_effect_bubbles_enabled, click_effect_spring_enabled, enabled_fonts, updated_at";
 
 function missingHint(message: string) {
+  if (message.includes("click_effect_") || message.includes("enabled_fonts")) return "클릭효과/개별폰트 컬럼";
   if (message.includes("hand_font_") || message.includes("hand_paper_")) return "손편지 글씨체/편지지 컬럼";
   if (message.includes("announcement_")) return "공지 컬럼";
   return "system_settings 확장 컬럼";
@@ -55,18 +59,29 @@ export async function GET() {
           hand_compose_font_size: 18,
           hand_viewer_font_size: 18,
           whitespace_test_enabled: false,
+          click_effect_bubbles_enabled: true,
+          click_effect_spring_enabled: true,
+          enabled_fonts: DEFAULT_ENABLED_FONTS,
           updated_at: new Date().toISOString(),
         },
         setup_needed: true,
         missing_columns_hint: hint,
-        error: `system_settings 테이블에 ${hint}이 없습니다. 016_system_settings_admin.sql과 019_hand_letter_ui_settings.sql을 모두 실행하세요.`,
+        error: `system_settings 테이블에 ${hint}이 없습니다. 023_cute_interactions_and_fonts.sql 마이그레이션을 실행하세요.`,
       });
     }
 
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ settings: data });
+  // Ensure default values exist if database query was successful but columns were missing or null
+  const settings = {
+    ...data,
+    click_effect_bubbles_enabled: data.click_effect_bubbles_enabled ?? true,
+    click_effect_spring_enabled: data.click_effect_spring_enabled ?? true,
+    enabled_fonts: data.enabled_fonts ?? DEFAULT_ENABLED_FONTS,
+  };
+
+  return NextResponse.json({ settings });
 }
 
 export async function PATCH(request: Request) {
@@ -89,6 +104,9 @@ export async function PATCH(request: Request) {
     hand_compose_font_size?: number;
     hand_viewer_font_size?: number;
     whitespace_test_enabled?: boolean;
+    click_effect_bubbles_enabled?: boolean;
+    click_effect_spring_enabled?: boolean;
+    enabled_fonts?: string[];
   };
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -107,6 +125,11 @@ export async function PATCH(request: Request) {
   if (typeof body.hand_compose_font_size === "number" && body.hand_compose_font_size >= 12) updates.hand_compose_font_size = body.hand_compose_font_size;
   if (typeof body.hand_viewer_font_size === "number" && body.hand_viewer_font_size >= 12) updates.hand_viewer_font_size = body.hand_viewer_font_size;
   if (typeof body.whitespace_test_enabled === "boolean") updates.whitespace_test_enabled = body.whitespace_test_enabled;
+  if (typeof body.click_effect_bubbles_enabled === "boolean") updates.click_effect_bubbles_enabled = body.click_effect_bubbles_enabled;
+  if (typeof body.click_effect_spring_enabled === "boolean") updates.click_effect_spring_enabled = body.click_effect_spring_enabled;
+  if (Array.isArray(body.enabled_fonts) && body.enabled_fonts.every((f) => typeof f === "string")) {
+    updates.enabled_fonts = body.enabled_fonts;
+  }
 
   if (Object.keys(updates).length === 1) {
     return NextResponse.json({ error: "변경할 설정값이 없습니다." }, { status: 400 });
@@ -123,7 +146,7 @@ export async function PATCH(request: Request) {
       const hint = missingHint(error.message);
       return NextResponse.json(
         {
-          error: `system_settings 테이블에 ${hint}이 없습니다. 016_system_settings_admin.sql과 019_hand_letter_ui_settings.sql을 모두 실행하세요.`,
+          error: `system_settings 테이블에 ${hint}이 없습니다. 023_cute_interactions_and_fonts.sql 마이그레이션을 실행하세요.`,
         },
         { status: 400 },
       );
@@ -131,5 +154,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ settings: data });
+  const settings = {
+    ...data,
+    click_effect_bubbles_enabled: data.click_effect_bubbles_enabled ?? true,
+    click_effect_spring_enabled: data.click_effect_spring_enabled ?? true,
+    enabled_fonts: data.enabled_fonts ?? DEFAULT_ENABLED_FONTS,
+  };
+
+  return NextResponse.json({ settings });
 }
+
