@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/internal/generation-worker?limit=5",
-      "schedule": "* * * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }
