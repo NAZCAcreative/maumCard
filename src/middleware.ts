@@ -4,7 +4,13 @@ import type { NextRequest } from "next/server";
 import type { ResponseCookie } from "next/dist/compiled/@edge-runtime/cookies";
 import { isAdminUser } from "@/lib/adminAccess";
 
-const PUBLIC_PATHS = ["/login", "/signup"];
+const PUBLIC_PATHS = new Set([
+  "/login",
+  "/signup",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/app-icon.svg",
+]);
 type CookieToSet = {
   name: string;
   value: string;
@@ -54,7 +60,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (!user && !PUBLIC_PATHS.includes(pathname)) {
+  if (!user && !PUBLIC_PATHS.has(pathname)) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
@@ -65,5 +71,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|auth/|api/|share/|payment/).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|app-icon.svg|auth/|api/|share/|payment/).*)",
+  ],
 };
