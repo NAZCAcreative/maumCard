@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 import { CuteInteractionProvider } from "@/components/ui/CuteInteractionProvider";
@@ -8,7 +8,6 @@ export const metadata: Metadata = {
   title: "마음카드",
   description: "마음을 전하는 감성 메시지 카드",
   manifest: "/manifest.webmanifest",
-  themeColor: "#ef7f91",
   appleWebApp: {
     capable: true,
     title: "마음카드",
@@ -19,6 +18,10 @@ export const metadata: Metadata = {
     description: "마음을 전하는 감성 메시지 카드",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ef7f91",
 };
 
 export default function RootLayout({

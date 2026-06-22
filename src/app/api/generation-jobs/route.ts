@@ -46,9 +46,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "유효한 idempotencyKey가 필요합니다." }, { status: 400 });
   }
 
+  const payload = {
+    prompt: body.payload.prompt.trim().slice(0, 1000),
+    promptCode: typeof body.payload.promptCode === "string"
+      ? body.payload.promptCode.slice(0, 80)
+      : undefined,
+    purpose: typeof body.payload.purpose === "string"
+      ? body.payload.purpose.slice(0, 80)
+      : undefined,
+    recipient: typeof body.payload.recipient === "string"
+      ? body.payload.recipient.slice(0, 80)
+      : undefined,
+    message: typeof body.payload.message === "string"
+      ? body.payload.message.slice(0, 500)
+      : undefined,
+  };
+
   const { data, error } = await supabase.rpc("enqueue_generation_job", {
     p_job_type: body.type,
-    p_payload: body.payload,
+    p_payload: payload,
     p_idempotency_key: idempotencyKey,
     p_credit_cost: 1,
   });
@@ -98,4 +114,3 @@ export async function GET() {
   }
   return NextResponse.json({ jobs: data });
 }
-

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { generateAiBackground, type AiBackgroundInput } from "@/lib/generation/ai-background";
 
+export const maxDuration = 300;
+
 type GenerationJob = {
   id: string;
   user_id: string;
@@ -13,14 +15,19 @@ type GenerationJob = {
 };
 
 function hasValidWorkerSecret(request: Request): boolean {
-  const expected = process.env.GENERATION_WORKER_SECRET;
   const actual = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!expected || !actual) return false;
-
-  const expectedBuffer = Buffer.from(expected);
+  if (!actual) return false;
   const actualBuffer = Buffer.from(actual);
-  return expectedBuffer.length === actualBuffer.length
-    && timingSafeEqual(expectedBuffer, actualBuffer);
+  const candidates = [
+    process.env.GENERATION_WORKER_SECRET,
+    process.env.CRON_SECRET,
+  ].filter((value): value is string => Boolean(value));
+
+  return candidates.some((expected) => {
+    const expectedBuffer = Buffer.from(expected);
+    return expectedBuffer.length === actualBuffer.length
+      && timingSafeEqual(expectedBuffer, actualBuffer);
+  });
 }
 
 async function completeJob(job: GenerationJob) {
@@ -87,7 +94,7 @@ async function failJob(job: GenerationJob, error: unknown) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.GENERATION_WORKER_SECRET) {
+  if (!process.env.GENERATION_WORKER_SECRET && !process.env.CRON_SECRET) {
     return NextResponse.json({ error: "Worker secret is not configured." }, { status: 503 });
   }
   if (!hasValidWorkerSecret(request)) {
@@ -120,3 +127,4 @@ export async function POST(request: Request) {
   });
 }
 
+export const GET = POST;
