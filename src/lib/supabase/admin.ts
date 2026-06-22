@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { normalizeSupabaseUrl } from "@/lib/supabase/url";
 
 // Service role client — bypasses RLS. Server-side only.
 // 모듈 로드 시점이 아니라 "첫 사용 시점"에 생성한다.
@@ -10,7 +11,7 @@ let cached: SupabaseClient<any> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getAdmin(): SupabaseClient<any> {
   if (!cached) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) {
       throw new Error(
