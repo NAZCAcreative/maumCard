@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
   Bookmark,
   Cake,
   CalendarDays,
@@ -11,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  EyeOff,
   Flower2,
   Folder,
   Heart,
@@ -30,11 +32,13 @@ import {
   Type,
   User,
   X,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { signOut } from "@/lib/auth";
-import { saveCard, getMyCards, toggleFavorite as dbToggleFavorite, deleteCard as dbHideCard, hardDeleteCard as dbDeleteCard, deleteAllCards as dbDeleteAllCards, updateCardImageUrl } from "@/lib/cards";
+import { saveCard, getMyCards, toggleFavorite as dbToggleFavorite, deleteCard as dbHideCard, hardDeleteCard as dbDeleteCard, deleteAllCards as dbDeleteAllCards, updateCardImageUrl, updateCardGifUrl } from "@/lib/cards";
 import { getFavoriteMessages, addFavoriteMessage, deleteFavoriteMessage } from "@/lib/favoriteMessages";
 import type { FavoriteMessage } from "@/lib/favoriteMessages";
 import { getAnniversaries, createAnniversary, updateAnniversary, deleteAnniversary } from "@/lib/anniversaries";
@@ -46,6 +50,9 @@ import { CARD_FONTS } from "@/lib/card-fonts";
 import { ThemePanel } from "@/components/layout/ThemeSettings";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { SmoothImage } from "@/components/ui/SmoothImage";
+import { generateRetroGif } from "@/lib/retro-gif";
+import { GIF_EFFECTS, type GifEffectId } from "@/lib/retro-effect";
+import { useSpeechToText } from "@/lib/useSpeechToText";
 import type { Database, Json } from "@/types/supabase";
 import Image from "next/image";
 
@@ -74,6 +81,7 @@ type Draft = {
   honorific: string;
   message: string;
   bg: string;
+  bgFilter?: string; // 배경 사진 필터 (none/bright/insta/bw/vintage)
   handFont: HandFont;
   handTone: HandTone;
   handMode: "recommend" | "direct";
@@ -100,6 +108,7 @@ type Draft = {
   footer?: string; // 하단 메세지 (내용 아래)
   authorEnabled?: boolean; // 작성자 표시 여부
   author?: string; // 작성자 이름
+  contentAlign?: "left" | "center" | "right"; // 본문(BODY) 가로 정렬
   titleBold?: boolean; // 제목 굵게 여부
   contentBold?: boolean; // 내용 굵게 여부
   footerBold?: boolean; // 보내는 사람 굵게 여부
@@ -128,6 +137,7 @@ type WsRegion = {
   cx: number; cy: number; x0: number; y0: number; x1: number; y1: number;
   band: "top" | "center" | "bottom";
   density: number; emptiness: number; wRatio: number; hRatio: number;
+  brightness?: number;
 };
 
 const defaultDraft: Draft = {
@@ -137,6 +147,7 @@ const defaultDraft: Draft = {
   honorific: "에게",
   message: "",
   bg: "flower",
+  bgFilter: "none",
   handFont: "round",
   handTone: "general",
   handMode: "recommend",
@@ -429,7 +440,8 @@ function getRecommendedTypography(draft: Draft) {
     "gaegu";
 
   return {
-    titleFont: "himelody",
+    // 기본 폰트: 제목·본문·푸터 세 박스 모두 같은 폰트 사용 (푸터는 본문 폰트 상속)
+    titleFont: contentFont,
     contentFont,
     titleScale: titleLength > 12 ? 0.82 : titleLength > 8 ? 0.9 : 1,
     contentScale: bodyOnly && messageLength <= 12 ? 1.08 : bodyOnly && messageLength <= 24 ? 1.04 : bodyOnly && isShort ? 1 : messageLength > 0 && messageLength <= 24 ? 1 : isShort ? 1 : messageLength > 100 ? 0.92 : messageLength > 55 ? 0.96 : 1,
@@ -1459,7 +1471,7 @@ export function HomeScreen() {
   const { items: anniversaries } = useSupabaseAnniversaries();
   const { items: commonAnniversaries, settings: commonSettings } = useCommonAnniversaries();
   const { items: dbBackgrounds } = useDbBackgrounds();
-  const { items: homeCards } = useHomeFeaturedCards();
+  const { items: homeCards, fetching: homeCardsFetching } = useHomeFeaturedCards();
   const { user, loading: authLoading } = useAuth();
   const [themeOpen, setThemeOpen] = useState(false);
   const recentCards = cards.filter((c) => !c.id.startsWith("sample-")).slice(0, 4);
@@ -1509,11 +1521,14 @@ export function HomeScreen() {
     return selected.slice(0, commonSettings.max_visible);
   })();
   const displayName = user?.nickname ?? "마음님";
-  const featuredMessage = featuredHomeCard?.message || featuredCard?.message || "오늘도 당신을 응원합니다";
+  // 관리자 추천 카드 로딩이 끝나기 전엔 유저 카드/배경으로 폴백하지 않는다.
+  // (먼저 로드된 유저 카드가 떴다가 관리자 카드로 교체되며 사라지는 깜빡임 방지)
+  const featuredFallback = homeCardsFetching ? null : (featuredCard ?? null);
+  const featuredMessage = featuredHomeCard?.message || featuredFallback?.message || "오늘도 당신을 응원합니다";
   const featuredTitle = featuredHomeCard?.title || "오늘의 카드";
   const featuredCtaLabel = featuredHomeCard?.cta_label || "카드 만들기";
   const featuredLink = featuredHomeCard?.link_href || "/create/background";
-  const featuredImageUrl = featuredHomeCard?.image_url || featuredCard?.cardImageUrl || homeBackground?.url || null;
+  const featuredImageUrl = featuredHomeCard?.image_url || featuredFallback?.cardImageUrl || (homeCardsFetching ? null : homeBackground?.url) || null;
 
   return (
     <PhoneShell hideHeader>
@@ -1802,6 +1817,22 @@ export function MessageScreen() {
   const [correctError, setCorrectError] = useState<string | null>(null);
   const [correctTone, setCorrectTone] = useState<string>(AI_TONE_OPTIONS[0].id);
 
+  // 직접입력 음성 모드 — 마이크로 말하면 받아쓰기되어 본문에 입력된다.
+  const { supported: voiceSupported, listening: voiceListening, start: startVoice, stop: stopVoice } = useSpeechToText("ko-KR");
+  const voiceBaseRef = useRef("");
+  const toggleVoice = () => {
+    if (voiceListening) {
+      stopVoice();
+      return;
+    }
+    voiceBaseRef.current = draft.message ? draft.message.trimEnd() + " " : "";
+    startVoice((sessionText) => {
+      const combined = (voiceBaseRef.current + sessionText).slice(0, handMessageMaxLength);
+      setDraft({ message: combined, messageOrigin: "direct", contentRotation: undefined });
+      setCorrectedOptions(null);
+    });
+  };
+
   useEffect(() => {
     if (!draftHydrated || messageEntryResetRef.current) return;
     messageEntryResetRef.current = true;
@@ -2022,22 +2053,38 @@ export function MessageScreen() {
           {/* 직접 입력 */}
           {isDirectMode ? (
             <div className="mt-3 space-y-3">
-              <textarea
-                value={draft.message}
-                onChange={(e) => {
-                  const nextValue = e.target.value.slice(0, handMessageMaxLength);
-                  setDraft({ message: nextValue, messageOrigin: "direct", contentRotation: undefined });
-                  setCorrectedOptions(null);
-                }}
-                placeholder={length === "hand"
-                  ? "마음을 담아 손편지처럼 길게 써보세요."
-                  : length === "long"
-                    ? "마음을 담아 편지를 써보세요. (장문)"
-                    : "마음을 담은 문구를 입력해주세요."}
-                maxLength={length === "hand" ? handMessageMaxLength : undefined}
-                className={`w-full rounded-md border border-stone-200 p-4 leading-7 outline-none focus:border-[#7b310d] ${length === "hand" || length === "long" ? "min-h-52" : "min-h-40"}`}
-                style={length === "hand" ? { fontFamily: HAND_GOTHIC_FONT, fontSize: `${uiSettings.hand_compose_font_size}px` } : undefined}
-              />
+              <div className="relative">
+                <textarea
+                  value={draft.message}
+                  onChange={(e) => {
+                    const nextValue = e.target.value.slice(0, handMessageMaxLength);
+                    setDraft({ message: nextValue, messageOrigin: "direct", contentRotation: undefined });
+                    setCorrectedOptions(null);
+                  }}
+                  placeholder={length === "hand"
+                    ? "마음을 담아 손편지처럼 길게 써보세요."
+                    : length === "long"
+                      ? "마음을 담아 편지를 써보세요. (장문)"
+                      : "마음을 담은 문구를 입력해주세요."}
+                  maxLength={length === "hand" ? handMessageMaxLength : undefined}
+                  className={`w-full rounded-md border border-stone-200 p-4 pb-16 leading-7 outline-none focus:border-[#7b310d] ${length === "hand" || length === "long" ? "min-h-52" : "min-h-40"}`}
+                  style={length === "hand" ? { fontFamily: HAND_GOTHIC_FONT, fontSize: `${uiSettings.hand_compose_font_size}px` } : undefined}
+                />
+                {/* 음성 입력 — 마이크를 눌러 말하면 받아쓰기되어 본문에 입력 */}
+                {voiceSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleVoice}
+                    aria-label={voiceListening ? "음성 입력 중지" : "음성으로 입력"}
+                    className={`absolute bottom-3 right-3 flex h-11 items-center gap-1.5 rounded-full px-4 text-sm font-bold text-white shadow transition active:scale-95 ${
+                      voiceListening ? "animate-pulse bg-red-500" : "bg-[#7b310d]"
+                    }`}
+                  >
+                    {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    {voiceListening ? "듣는 중..." : "음성 입력"}
+                  </button>
+                )}
+              </div>
               {length === "hand" && (
                 <p className={`text-right text-xs font-semibold ${draft.message.length > handMessageMaxLength * 0.9 ? "text-[#7b310d]" : "text-stone-400"}`}>
                   {draft.message.length}/{handMessageMaxLength}
@@ -2380,13 +2427,137 @@ const BG_CATEGORIES = [
   { id: "pattern", label: "🎨 패턴" },
 ];
 
+// 배경 사진 필터 프리셋 (미리보기에서 선택, 서버 sharp 로 baked)
+const BG_FILTERS: Array<{ id: string; label: string }> = [
+  { id: "none", label: "원본" },
+  { id: "bright", label: "밝게" },
+  { id: "insta", label: "인스타" },
+  { id: "bw", label: "흑백" },
+  { id: "vintage", label: "빈티지" },
+];
+
+// 내 사진(사용자 업로드) 분류용 카테고리
+const MY_PHOTO_CATEGORIES = [
+  { id: "portrait", label: "👤 인물" },
+  { id: "scenery", label: "🏞️ 풍경" },
+  { id: "daily", label: "☕ 일상" },
+  { id: "travel", label: "✈️ 여행" },
+  { id: "etc", label: "📌 기타" },
+];
+
+type UserBackground = {
+  id: string;
+  name: string;
+  category: string;
+  url: string;
+  storage_path: string;
+};
+
+const USER_BG_BUCKET = "user-backgrounds";
+
+// 계정별 업로드 배경: 로드 / 업로드(스토리지+DB) / 삭제
+function useUserBackgrounds() {
+  const [items, setItems] = useState<UserBackground[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    const { data } = await supabase
+      .from("user_backgrounds")
+      .select("id, name, category, url, storage_path")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    setItems((data ?? []) as UserBackground[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const upload = useCallback(async (file: File, category: string): Promise<UserBackground | null> => {
+    setError(null);
+    if (!file.type.startsWith("image/")) {
+      setError("이미지 파일만 올릴 수 있어요.");
+      return null;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("10MB 이하 이미지만 올릴 수 있어요.");
+      return null;
+    }
+    setUploading(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("로그인 후 이용해주세요.");
+        return null;
+      }
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const storagePath = `${user.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from(USER_BG_BUCKET)
+        .upload(storagePath, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from(USER_BG_BUCKET).getPublicUrl(storagePath);
+      const { data: inserted, error: insertError } = await supabase
+        .from("user_backgrounds")
+        .insert({ user_id: user.id, name: file.name.slice(0, 60), category, storage_path: storagePath, url: publicUrl })
+        .select("id, name, category, url, storage_path")
+        .single();
+      if (insertError) throw insertError;
+
+      const item = inserted as UserBackground;
+      setItems((prev) => [item, ...prev]);
+      return item;
+    } catch {
+      setError("사진 업로드에 실패했어요. 다시 시도해주세요.");
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const remove = useCallback(async (item: UserBackground) => {
+    setItems((prev) => prev.filter((b) => b.id !== item.id));
+    const supabase = createClient();
+    await supabase.storage.from(USER_BG_BUCKET).remove([item.storage_path]);
+    await supabase.from("user_backgrounds").delete().eq("id", item.id);
+  }, []);
+
+  return { items, loading, uploading, error, upload, remove };
+}
+
 export function BackgroundScreen() {
   const router = useRouter();
   const [draft, setDraft] = useDraft();
   const uiSettings = usePublicUiSettings();
-  const [tab, setTab] = useState<"gallery" | "ai">("gallery");
+  const [tab, setTab] = useState<"gallery" | "mine" | "ai">("gallery");
   const [catFilter, setCatFilter] = useState("all");
   const [aiPrompt, setAiPrompt] = useState("");
+  // 내 사진(업로드) 관련
+  const userBgs = useUserBackgrounds();
+  const [uploadCat, setUploadCat] = useState("etc");
+  const [mineFilter, setMineFilter] = useState("all");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 같은 파일 재선택 허용
+    if (!file) return;
+    const item = await userBgs.upload(file, uploadCat);
+    if (item) {
+      setDraft({ bg: item.url });
+      setMineFilter("all");
+    }
+  };
   const { loading: aiLoading, progress: aiProgress, url: aiUrl, error: aiError, generate: aiGenerate, reset: aiReset } = useAIBackground();
   const { items: dbBgs, fetching } = useDbBackgrounds();
 
@@ -2404,7 +2575,7 @@ export function BackgroundScreen() {
   // 빈영역 탐지 테스트
   const [wsRegion, setWsRegion] = useState<WsRegion | null>(null);
   const [wsLoading, setWsLoading] = useState(false);
-  const [wsMeta, setWsMeta] = useState<{ band: string; ms: number; emptiness: number; wRatio: number; hRatio: number } | null>(null);
+  const [wsMeta, setWsMeta] = useState<{ band: string; ms: number; emptiness: number; brightness: number; wRatio: number; hRatio: number } | null>(null);
 
   useEffect(() => { setWsRegion(null); setWsMeta(null); }, [draft.bg]);
 
@@ -2425,6 +2596,7 @@ export function BackgroundScreen() {
           band: data.region.band,
           ms: data.ms ?? 0,
           emptiness: data.region.emptiness,
+          brightness: data.region.brightness ?? 0,
           wRatio: data.region.wRatio,
           hRatio: data.region.hRatio,
         });
@@ -2458,20 +2630,30 @@ export function BackgroundScreen() {
       <h1 className="text-center text-2xl font-black leading-9">마음에 드는 배경을<br />선택해주세요.</h1>
       {/* 재정렬 흐름: 배경(1단계) */}
 
-      {/* 탭 — 배경 갤러리 / ✨ AI 생성. AI 비활성 시 갤러리만 남으므로 탭바를 숨긴다. */}
-      {uiSettings.ai_background_enabled && (
-        <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1">
-          {([["gallery", "배경 갤러리"], ["ai", "✨ AI 생성"]] as const).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`h-10 rounded-lg text-xs font-bold transition ${tab === key ? "bg-[#7b310d] text-white shadow" : "text-stone-600"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* 탭 — 배경 갤러리 / 내 사진 / (✨ AI 생성: 관리자 활성 시) */}
+      {(() => {
+        const tabs: Array<readonly ["gallery" | "mine" | "ai", string]> = [
+          ["gallery", "배경 갤러리"],
+          ["mine", "📷 내 사진"],
+          ...(uiSettings.ai_background_enabled ? [["ai", "✨ AI 생성"] as const] : []),
+        ];
+        return (
+          <div
+            className="mt-5 grid gap-1 rounded-xl bg-stone-100 p-1"
+            style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+          >
+            {tabs.map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`h-10 rounded-lg text-xs font-bold transition ${tab === key ? "bg-[#7b310d] text-white shadow" : "text-stone-600"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* 저장된 배경 갤러리 */}
       {tab === "gallery" && (
@@ -2531,6 +2713,103 @@ export function BackgroundScreen() {
             </div>
           </>
         )
+      )}
+
+      {/* 내 사진 (계정별 업로드 배경) */}
+      {tab === "mine" && (
+        <div className="mt-4 space-y-4">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={handlePickFile}
+          />
+
+          {/* 업로드: 카테고리 선택 후 사진 올리기 */}
+          <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+            <p className="text-xs font-bold text-stone-500">분류 선택 후 사진을 올리면 내 배경으로 저장돼요.</p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {MY_PHOTO_CATEGORIES.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setUploadCat(c.id)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${uploadCat === c.id ? "bg-[#7b310d] text-white" : "bg-white text-stone-600 border border-stone-200"}`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={userBgs.uploading}
+              className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#7b310d] text-sm font-bold text-white transition active:scale-[0.99] disabled:bg-stone-300"
+            >
+              {userBgs.uploading ? "올리는 중..." : (<><Plus size={18} /> 사진 올리기</>)}
+            </button>
+            {userBgs.error && <p className="mt-2 text-xs font-bold text-red-500">{userBgs.error}</p>}
+          </div>
+
+          {/* 내 사진 목록 */}
+          {userBgs.loading ? (
+            <div className="flex justify-center py-10 text-stone-400">
+              <div className="grid h-10 w-10 place-items-center rounded-full border-4 border-stone-200 border-t-[#7b310d] animate-spin" />
+            </div>
+          ) : userBgs.items.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-stone-300 py-10 text-stone-400">
+              <p className="text-sm font-semibold">아직 올린 사진이 없어요.</p>
+              <p className="text-xs">위에서 사진을 올려 나만의 배경을 만들어보세요.</p>
+            </div>
+          ) : (
+            <>
+              {/* 카테고리 필터 */}
+              {(() => {
+                const usedCats = new Set(userBgs.items.map((b) => b.category));
+                const visibleCats = [{ id: "all", label: "전체" }, ...MY_PHOTO_CATEGORIES.filter((c) => usedCats.has(c.id))];
+                return visibleCats.length > 1 ? (
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                    {visibleCats.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setMineFilter(c.id)}
+                        className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-bold transition ${mineFilter === c.id ? "bg-[#7b310d] text-white" : "bg-stone-100 text-stone-600"}`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+
+              <div className="grid grid-cols-3 gap-2">
+                {userBgs.items
+                  .filter((bg) => mineFilter === "all" || bg.category === mineFilter)
+                  .map((bg) => {
+                    const selected = draft.bg === bg.url;
+                    return (
+                      <div key={bg.id} className={`relative aspect-[3/4] overflow-hidden rounded-xl ${selected ? "ring-4 ring-[#7b310d]" : ""}`}>
+                        <button onClick={() => setDraft({ bg: bg.url })} className="block h-full w-full" aria-label="이 사진을 배경으로 사용">
+                          <SmoothImage src={bg.url} alt={bg.name} className="h-full w-full object-cover" />
+                        </button>
+                        {selected && (
+                          <span className="pointer-events-none absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[#7b310d] text-white">
+                            <Check size={13} />
+                          </span>
+                        )}
+                        <button
+                          onClick={() => userBgs.remove(bg)}
+                          className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/55 text-white transition hover:bg-red-500"
+                          aria-label="사진 삭제"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* AI 생성 */}
@@ -2638,7 +2917,7 @@ export function BackgroundScreen() {
         )}
         {wsMeta && (
           <p className="mt-2 text-center text-[11px] font-semibold text-stone-500">
-            {wsMeta.band} · 비어있음 {(wsMeta.emptiness * 100).toFixed(0)}% · 크기 {(wsMeta.wRatio * 100).toFixed(0)}×{(wsMeta.hRatio * 100).toFixed(0)}% · {wsMeta.ms}ms
+            {wsMeta.band} · 비어있음 {(wsMeta.emptiness * 100).toFixed(0)}% · 밝기 {(wsMeta.brightness * 100).toFixed(0)}% · 크기 {(wsMeta.wRatio * 100).toFixed(0)}×{(wsMeta.hRatio * 100).toFixed(0)}% · {wsMeta.ms}ms
           </p>
         )}
       </div>
@@ -2677,6 +2956,9 @@ export function PreviewScreen() {
   // 텍스트 측정 기반 위치 보정이 끝났는지 여부. 보정 전까지 카드를 숨겨
   // "배치 후 위치조정" 점프가 보이지 않도록 한다.
   const [layoutSettled, setLayoutSettled] = useState(false);
+  // 사진 필터 재생성 중 표시 ("적용중입니다" 스피너)
+  const [filterApplying, setFilterApplying] = useState(false);
+  const hasRenderedOnceRef = useRef(false);
   const [previewWsRegion, setPreviewWsRegion] = useState<WsRegion | null>(null);
   const [showTextBoxes, setShowTextBoxes] = useState(true);
   const [selectedTextBoxPart, setSelectedTextBoxPart] = useState<PreviewTextPart | null>("title");
@@ -2747,7 +3029,7 @@ export function PreviewScreen() {
     fetch("/api/whitespace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bg: draft.bg }),
+      body: JSON.stringify({ bg: draft.bg, bg_filter: draft.bgFilter || "none" }),
     })
       .then((res) => res.json())
       .then((data: { region?: WsRegion }) => {
@@ -2760,7 +3042,7 @@ export function PreviewScreen() {
         if (!cancelled) setWhitespaceReady(true);
       });
     return () => { cancelled = true; };
-  }, [draft.bg, draftHydrated]);
+  }, [draft.bg, draft.bgFilter, draftHydrated]);
 
   useEffect(() => {
     if (!draftHydrated || !whitespaceReady) return;
@@ -2826,6 +3108,7 @@ export function PreviewScreen() {
           name: d.title || "",
           message: d.message || "당신을 응원합니다. 오늘도 행복하세요.",
           bg: d.bg || "flower",
+          bg_filter: d.bgFilter || "none",
           purpose: d.purpose || "love",
           hand_font: d.handFont,
           hand_tone: d.handTone,
@@ -2857,6 +3140,7 @@ export function PreviewScreen() {
           omit_text_part: omitTextPart,
           title_bold: d.titleBold,
           content_bold: d.contentBold,
+          content_align: d.contentAlign,
           footer_bold: d.footerBold,
       }),
       signal,
@@ -2874,12 +3158,12 @@ export function PreviewScreen() {
     const res = await fetch("/api/card-image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bg: draftRef.current.bg || "flower", background_only: true }),
+      body: JSON.stringify({ bg: draftRef.current.bg || "flower", bg_filter: draft.bgFilter || "none", background_only: true }),
       signal,
     });
     if (!res.ok) throw new Error("card background failed");
     return URL.createObjectURL(await res.blob());
-  }, []);
+  }, [draft.bgFilter]);
 
   // AI(OpenAI) 감성 합성은 백엔드 모듈(card-ai-compose)로 분리됨.
   // 프론트에서 다시 노출하려면 createCardImage(true, "sub")를 버튼에 연결.
@@ -2888,10 +3172,14 @@ export function PreviewScreen() {
     if (!draftHydrated || !typographyReady || !whitespaceReady) return;
     const abortController = new AbortController();
     const loadPreview = async () => {
+      // 첫 로드가 아니면(필터 변경 등 재생성) "적용중" 스피너 표시
+      const isRegen = hasRenderedOnceRef.current;
+      if (isRegen) setFilterApplying(true);
       try {
         const imageUrl = await createBackgroundImage(abortController.signal);
         if (abortController.signal.aborted) return;
         setCardImageUrl(imageUrl);
+        hasRenderedOnceRef.current = true;
         setProgress(100);
         setDone(true);
       } catch {
@@ -2899,6 +3187,8 @@ export function PreviewScreen() {
         setGenerationError("카드 배경을 불러오지 못했습니다. 다시 시도해주세요.");
         setProgress(100);
         setDone(true);
+      } finally {
+        if (!abortController.signal.aborted) setFilterApplying(false);
       }
     };
     void loadPreview();
@@ -3694,6 +3984,17 @@ export function PreviewScreen() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={cardImageUrl} alt="마음카드 배경" className="w-full select-none" draggable={false} />
+          {filterApplying && (
+            <div className="absolute inset-0 z-[5] grid place-items-center bg-white/50 backdrop-blur-[1px]">
+              <div className="flex flex-col items-center gap-2 rounded-2xl bg-white/90 px-5 py-4 shadow-lg">
+                <div className="relative h-11 w-11">
+                  <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-[#7b310d] border-r-[#d98238]" style={{ animationDuration: "0.8s" }} />
+                  <div className="absolute inset-0 grid animate-pulse place-items-center text-lg">✨</div>
+                </div>
+                <span className="text-xs font-black text-[#7b310d]">적용중입니다…</span>
+              </div>
+            </div>
+          )}
           {previewTextBoxes.map(({ part, box, rotation, label }) => {
             const active = showTextBoxes && part === selectedTextBoxPart;
             const typography = getRecommendedTypography(draft);
@@ -3726,7 +4027,7 @@ export function PreviewScreen() {
               height: "100%",
               alignContent: "center",
               lineHeight: part === "content" ? 1.36 : part === "footer" ? 1.4 : 1.18,
-              textAlign: "center" as const,
+              textAlign: (part === "content" ? (draft.contentAlign ?? "center") : "center") as "left" | "center" | "right",
               wordBreak: "keep-all" as const,
               overflowWrap: "normal" as const,
               padding: `${4 * cardPreviewScale}px ${8 * cardPreviewScale}px`,
@@ -3880,7 +4181,6 @@ export function PreviewScreen() {
                 ? draft.footerFont ?? draft.contentFont ?? typography.contentFont
                 : draft.contentFont ?? typography.contentFont;
             const inlineFontFamily = CARD_FONTS.find((font) => font.id === inlineFontId)?.family;
-            const fontKey = part === "title" ? "titleFont" : part === "footer" ? "footerFont" : "contentFont";
             const colorKey = part === "title" ? "titleColor" : part === "footer" ? "footerColor" : "contentColor";
             const inlineColor = part === "title"
               ? draft.titleColor && draft.titleColor !== "auto" ? draft.titleColor : "#6f2f18"
@@ -3979,7 +4279,9 @@ export function PreviewScreen() {
                     aria-label={`${label} 글씨체 선택`}
                     value={inlineFontId}
                     onChange={(event) => {
-                      setDraftWithUndo({ [fontKey]: event.target.value });
+                      // 제목·내용·보내는사람 모두 같은 글씨체로 통일
+                      const f = event.target.value;
+                      setDraftWithUndo({ titleFont: f, contentFont: f, footerFont: f });
                     }}
                     className="h-full min-w-0 flex-1 cursor-pointer appearance-none bg-transparent px-1.5 pr-6 text-xs font-bold text-stone-800 outline-none"
                     style={{ fontFamily: inlineFontFamily }}
@@ -4036,6 +4338,30 @@ export function PreviewScreen() {
         <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-sm">
           {/* 폰트 미리보기용 @font-face (각 글씨체를 실제 모양으로 표시) */}
           <style>{CARD_FONTS.map((f) => `@font-face{font-family:'${f.family}';src:url('/fonts/${f.file}') format('truetype');font-display:swap;}`).join("")}</style>
+
+          {/* 사진 필터 (배경 효과) — 항상 노출, 선택 시 미리보기 즉시 적용 */}
+          <div className="border-b border-stone-100 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-sm font-black text-stone-800">사진 필터 <span className="text-xs font-semibold text-stone-400">(배경 효과)</span></span>
+              {filterApplying && (
+                <span className="flex items-center gap-1 text-[11px] font-black text-[#7b310d]">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#7b310d]/30 border-t-[#7b310d]" />
+                  적용중입니다…
+                </span>
+              )}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+              {BG_FILTERS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setDraftWithUndo({ bgFilter: id })}
+                  className={`shrink-0 rounded-lg border px-3.5 py-2 text-xs font-bold transition active:scale-95 ${(draft.bgFilter ?? "none") === id ? "border-[#7b310d] bg-orange-50 text-[#7b310d]" : "border-stone-200 bg-white text-stone-500"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <button
             type="button"
@@ -4168,7 +4494,6 @@ export function PreviewScreen() {
             const editPart = showTextBoxes && selectedTextBoxPart ? selectedTextBoxPart : "content";
             const isTitle = editPart === "title";
             const isFooter = editPart === "footer";
-            const fontKey = isTitle ? "titleFont" : isFooter ? "footerFont" : "contentFont";
             const colorKey = isTitle ? "titleColor" : isFooter ? "footerColor" : "contentColor";
             const scaleKey = isTitle ? "titleScale" : isFooter ? "footerScale" : "contentScale";
             const typography = getRecommendedTypography(draft);
@@ -4280,7 +4605,8 @@ export function PreviewScreen() {
                               onClick={() => {
                                 setShowTextBoxes(true);
                                 setSelectedTextBoxPart(editPart);
-                                setDraftWithUndo({ [fontKey]: f.id });
+                                // 제목·내용·보내는사람 모두 같은 글씨체로 통일
+                                setDraftWithUndo({ titleFont: f.id, contentFont: f.id, footerFont: f.id });
                               }}
                               className={`flex w-full items-center justify-between gap-3 border-b border-stone-50 px-3 py-2 text-left transition ${active ? "bg-orange-50" : "hover:bg-stone-50"}`}
                             >
@@ -4412,6 +4738,35 @@ export function PreviewScreen() {
                   </div>
                 </div>
 
+                {/* 본문 정렬 (BODY 전용) */}
+                {editPart === "content" && (
+                  <div className="rounded-2xl border border-stone-200 bg-white p-3.5">
+                    <label className="text-xs font-bold text-stone-500">본문 정렬</label>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {([["left", "왼쪽"], ["center", "중앙"], ["right", "오른쪽"]] as const).map(([id, label]) => {
+                        const active = (draft.contentAlign ?? "center") === id;
+                        return (
+                          <button
+                            type="button"
+                            key={id}
+                            onClick={() => {
+                              setShowTextBoxes(true);
+                              setSelectedTextBoxPart("content");
+                              setDraftWithUndo({ contentAlign: id });
+                            }}
+                            className={`flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-bold transition ${
+                              active ? "border-[#7b310d] bg-orange-50 text-[#7b310d]" : "border-stone-200 bg-white text-stone-500 hover:bg-stone-50"
+                            }`}
+                          >
+                            {id === "left" ? <AlignLeft size={14} /> : id === "right" ? <AlignRight size={14} /> : <AlignCenter size={14} />}
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* 배치 (공통) */}
                 <div>
                   <label className="text-xs font-bold text-stone-500">글씨 배치 <span className="font-normal text-stone-400">(공통)</span></label>
@@ -4438,6 +4793,7 @@ export function PreviewScreen() {
                     ))}
                   </div>
                 </div>
+
               </div>
             );
           })()}
@@ -4498,80 +4854,154 @@ export function PreviewScreen() {
 }
 
 export function LibraryScreen() {
-  const { cards, loading, toggleFav, hideCard, deleteCard, deleteAll } = useSupabaseCards();
+  const { cards, loading, toggleFav, deleteCard, deleteAll } = useSupabaseCards();
   const { isSaved: isMessageSaved, toggle: toggleSavedMessage } = useFavMessages();
   const uiSettings = usePublicUiSettings();
   const [tab, setTab] = useState("전체");
-  const [editMode, setEditMode] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [confirmSelected, setConfirmSelected] = useState(false);
-  const [deletingSelected, setDeletingSelected] = useState(false);
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [expandedCard, setExpandedCard] = useState<CardItem | null>(null);
   const [msgExpanded, setMsgExpanded] = useState(false);
   const [savingMessage, setSavingMessage] = useState(false);
+  const [gifBusy, setGifBusy] = useState(false);
+  const [gifBlob, setGifBlob] = useState<Blob | null>(null);
+  const [gifPreviewUrl, setGifPreviewUrl] = useState<string | null>(null);
+  const [gifEffect, setGifEffect] = useState<GifEffectId>("sparkle");
+  const [gifSaved, setGifSaved] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const gifPreviewUrlRef = useRef<string | null>(null);
 
-  const displayed = cards.filter((card) => !hiddenIds.includes(card.id) && (tab !== "즐겨찾기" || card.favorite));
+  const replaceGifPreview = useCallback((blob: Blob | null) => {
+    if (gifPreviewUrlRef.current) {
+      URL.revokeObjectURL(gifPreviewUrlRef.current);
+    }
+    const nextUrl = blob ? URL.createObjectURL(blob) : null;
+    gifPreviewUrlRef.current = nextUrl;
+    setGifBlob(blob);
+    setGifPreviewUrl(nextUrl);
+  }, []);
+
+  useEffect(() => {
+    replaceGifPreview(null);
+    setShareUrl(null);
+  }, [expandedCard?.id, replaceGifPreview]);
+
+  const selectGifEffect = (effect: GifEffectId) => {
+    setGifEffect(effect);
+    setGifSaved(false);
+    setShareUrl(null);
+    replaceGifPreview(null);
+  };
+
+  useEffect(() => () => {
+    if (gifPreviewUrlRef.current) {
+      URL.revokeObjectURL(gifPreviewUrlRef.current);
+    }
+  }, []);
+
+  const handlePreviewGif = async () => {
+    const imgUrl = expandedCard?.cardImageUrl;
+    if (!imgUrl || gifBusy) return;
+    setGifBusy(true);
+    setGifSaved(false);
+    try {
+      const blob = await generateRetroGif(imgUrl, gifEffect);
+      replaceGifPreview(blob);
+    } catch {
+      window.alert("GIF 미리보기를 만들지 못했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setGifBusy(false);
+    }
+  };
+
+  const handleSaveGif = async () => {
+    const imgUrl = expandedCard?.cardImageUrl;
+    if (!imgUrl || gifBusy) return;
+    setGifBusy(true);
+    setGifSaved(false);
+    try {
+      const blob = gifBlob ?? await generateRetroGif(imgUrl, gifEffect);
+      if (!gifBlob) replaceGifPreview(blob);
+      const fileName = `마음카드_${gifEffect}_${expandedCard?.name ?? "card"}_${Date.now()}.gif`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setGifSaved(true);
+    } catch {
+      window.alert("GIF 만들기에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setGifBusy(false);
+    }
+  };
+
+  // GIF 를 스토리지에 올리고 카드별 공유 페이지(/share/[cardId]) 링크를 만들어 바로가기·공유.
+  const handleShareGif = async () => {
+    const card = expandedCard;
+    const imgUrl = card?.cardImageUrl;
+    if (!card || !imgUrl || gifBusy || shareBusy) return;
+    if (card.id.startsWith("local-") || card.id.startsWith("sample-")) {
+      window.alert("이 카드는 먼저 보관함에 저장해야 공유할 수 있어요.");
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const blob = gifBlob ?? await generateRetroGif(imgUrl, gifEffect);
+      if (!gifBlob) replaceGifPreview(blob);
+
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.alert("로그인 후 공유할 수 있어요.");
+        return;
+      }
+
+      // 작성자ID 폴더 아래에 GIF 저장 → 공개 URL 을 카드에 기록.
+      const fileName = `${user.id}/gifs/${card.id}_${Date.now()}.gif`;
+      const { error: uploadError } = await supabase.storage
+        .from("card-images")
+        .upload(fileName, blob, { contentType: "image/gif", upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(fileName);
+      await updateCardGifUrl(card.id, publicUrl);
+
+      const url = `${window.location.origin}/share/${card.id}`;
+      setShareUrl(url);
+
+      // 바로가기 + 공유 시도 (실패해도 아래 링크 버튼으로 다시 열 수 있음).
+      try { window.open(url, "_blank", "noopener"); } catch { /* popup blocked */ }
+      if (navigator.share) {
+        try { await navigator.share({ title: card.name, url }); } catch { /* cancelled */ }
+      } else if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
+      }
+    } catch {
+      window.alert("카드 공유에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const displayed = cards.filter((card) => tab !== "즐겨찾기" || card.favorite);
 
   const handleDelete = (cardId: string) => {
     deleteCard(cardId);
-    setSelectedIds((prev) => prev.filter((id) => id !== cardId));
     setConfirmId(null);
   };
 
   const handleDeleteAll = async () => {
     await deleteAll();
     setConfirmAll(false);
-    setEditMode(false);
-    setSelectedIds([]);
-  };
-
-  const toggleSelected = (cardId: string) => {
-    setSelectedIds((prev) => (
-      prev.includes(cardId) ? prev.filter((id) => id !== cardId) : [...prev, cardId]
-    ));
-    setConfirmSelected(false);
-  };
-
-  const allDisplayedSelected = displayed.length > 0 && displayed.every((card) => selectedIds.includes(card.id));
-
-  const toggleSelectAll = () => {
-    const displayedIds = displayed.map((card) => card.id);
-    setSelectedIds((prev) => {
-      if (allDisplayedSelected) return prev.filter((id) => !displayedIds.includes(id));
-      return Array.from(new Set([...prev, ...displayedIds]));
-    });
-    setConfirmSelected(false);
-  };
-
-  const handleDeleteSelected = async () => {
-    if (selectedIds.length === 0 || deletingSelected) return;
-    setDeletingSelected(true);
-    try {
-      await Promise.all(selectedIds.map((cardId) => deleteCard(cardId)));
-      setSelectedIds([]);
-      setConfirmSelected(false);
-    } finally {
-      setDeletingSelected(false);
-    }
-  };
-
-  const handleHide = (cardId: string) => {
-    hideCard(cardId);
-    setHiddenIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId]);
-    setSelectedIds((prev) => prev.filter((id) => id !== cardId));
-    setConfirmId(null);
   };
 
   return (
     <PhoneShell>
-      <LoadingOverlay
-        open={deletingSelected}
-        title="삭제 중입니다"
-        description={`선택한 카드 ${selectedIds.length}개를 삭제하고 있어요.`}
-      />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-black">내가 만든 카드</h1>
         <div className="flex items-center gap-3">
@@ -4581,24 +5011,12 @@ export function LibraryScreen() {
               onClick={() => {
                 setConfirmAll(true);
                 setConfirmId(null);
-                setConfirmSelected(false);
               }}
               className="text-sm font-bold text-red-500"
             >
               전체 삭제
             </button>
           )}
-          <button
-            onClick={() => {
-              setEditMode((v) => !v);
-              setConfirmId(null);
-              setConfirmSelected(false);
-              setSelectedIds([]);
-            }}
-            className={`text-sm font-bold ${editMode ? "text-[#7b310d]" : "text-stone-500"}`}
-          >
-            {editMode ? "완료" : "편집"}
-          </button>
         </div>
       </div>
       {confirmAll && cards.length > 0 && (
@@ -4606,40 +5024,6 @@ export function LibraryScreen() {
           <span className="flex-1 text-xs font-bold text-red-700">카드 {cards.length}개를 모두 삭제할까요?</span>
           <button onClick={handleDeleteAll} className="rounded-md bg-red-500 px-3 py-1 text-xs font-bold text-white">삭제</button>
           <button onClick={() => setConfirmAll(false)} className="rounded-md bg-stone-200 px-3 py-1 text-xs font-bold text-stone-600">취소</button>
-        </div>
-      )}
-      {editMode && cards.length > 0 && (
-        <div className="mt-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleSelectAll}
-              className="h-9 flex-1 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-600"
-            >
-              {allDisplayedSelected ? "전체 선택 해제" : `현재 목록 전체 선택 (${displayed.length})`}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmSelected(true)}
-              disabled={selectedIds.length === 0}
-              className="h-9 flex-1 rounded-xl bg-red-500 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400"
-            >
-              선택 삭제 ({selectedIds.length})
-            </button>
-          </div>
-          {confirmSelected && selectedIds.length > 0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
-              <span className="flex-1 text-xs font-bold text-red-700">선택한 카드 {selectedIds.length}개를 삭제할까요?</span>
-              <button
-                onClick={handleDeleteSelected}
-                disabled={deletingSelected}
-                className="rounded-md bg-red-500 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
-              >
-                {deletingSelected ? "삭제 중..." : "삭제"}
-              </button>
-              <button onClick={() => setConfirmSelected(false)} className="rounded-md bg-stone-200 px-3 py-1 text-xs font-bold text-stone-600">취소</button>
-            </div>
-          )}
         </div>
       )}
       <div className="mt-5 grid grid-cols-3 gap-2 rounded-md bg-stone-100 p-1">
@@ -4656,42 +5040,15 @@ export function LibraryScreen() {
         {displayed.map((card) => (
           <article
             key={card.id}
-            className={`relative rounded-lg border bg-white p-2 transition ${
-              selectedIds.includes(card.id) ? "border-[#7b310d] ring-2 ring-[#7b310d]/25" : "border-stone-200"
-            }`}
+            className="relative rounded-lg border border-stone-200 bg-white p-2 transition"
           >
-            {editMode && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => toggleSelected(card.id)}
-                  className={`absolute left-2 top-2 z-10 grid h-7 w-7 place-items-center rounded-full border-2 shadow ${
-                    selectedIds.includes(card.id) ? "border-[#7b310d] bg-[#7b310d] text-white" : "border-white bg-white/90 text-transparent"
-                  }`}
-                  aria-label={selectedIds.includes(card.id) ? "선택 해제" : "카드 선택"}
-                >
-                  <Check size={15} strokeWidth={3} />
-                </button>
-                <div className="absolute right-2 top-2 z-10 flex gap-1">
-                  <button
-                    onClick={() => handleHide(card.id)}
-                    className="grid h-7 w-7 place-items-center rounded-full bg-white/90 text-stone-600 shadow"
-                    aria-label="숨김"
-                  >
-                    <EyeOff size={13} />
-                  </button>
-                </div>
-              </>
-            )}
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 setConfirmId(confirmId === card.id ? null : card.id);
               }}
-              className={`absolute z-10 grid h-8 w-8 place-items-center rounded-full bg-red-500 text-white shadow transition hover:bg-red-600 ${
-                editMode ? "right-2 top-11" : "right-2 top-2"
-              }`}
+              className="absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-full bg-red-500 text-white shadow transition hover:bg-red-600"
               aria-label={`${card.name} 카드 삭제`}
             >
               <Trash2 size={14} />
@@ -4716,11 +5073,8 @@ export function LibraryScreen() {
             <button
               type="button"
               onClick={() => {
-                if (editMode) toggleSelected(card.id);
-                else {
-                  setExpandedCard(card);
-                  setMsgExpanded(false);
-                }
+                setExpandedCard(card);
+                setMsgExpanded(false);
               }}
               className="block w-full text-left"
               aria-label={`${card.name} 카드 확대`}
@@ -4732,11 +5086,9 @@ export function LibraryScreen() {
                 <div className="font-bold">{card.name}</div>
                 <div className="text-xs text-stone-500">{card.createdAt}</div>
               </div>
-              {!editMode && (
-                <button onClick={() => toggleFav(card.id, !card.favorite)} aria-label="즐겨찾기">
-                  <Star size={19} className={card.favorite ? "fill-amber-400 text-amber-400" : "text-stone-400"} />
-                </button>
-              )}
+              <button onClick={() => toggleFav(card.id, !card.favorite)} aria-label="즐겨찾기">
+                <Star size={19} className={card.favorite ? "fill-amber-400 text-amber-400" : "text-stone-400"} />
+              </button>
             </div>
           </article>
         ))}
@@ -4757,13 +5109,58 @@ export function LibraryScreen() {
           >
             <button
               onClick={() => setExpandedCard(null)}
-              className="absolute right-2 top-2 z-20 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-stone-800 shadow"
+              className="absolute right-2 top-2 z-30 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-stone-800 shadow"
               aria-label="닫기"
             >
               <X size={18} />
             </button>
-            <div className="mx-auto max-h-[62dvh] overflow-hidden rounded-t-2xl">
-              <CardArt card={expandedCard} />
+            <div className="relative mx-auto max-h-[62dvh] overflow-hidden rounded-t-2xl bg-stone-950">
+              {gifPreviewUrl ? (
+                <Image
+                  src={gifPreviewUrl}
+                  alt={`${expandedCard.name} 레트로 GIF 미리보기`}
+                  width={320}
+                  height={427}
+                  unoptimized
+                  className="mx-auto h-auto max-h-[62dvh] w-full object-contain"
+                />
+              ) : (
+                <CardArt card={expandedCard} />
+              )}
+              {gifBusy && (
+                <div className="absolute inset-0 z-10 grid place-items-center bg-black/55 text-white">
+                  <div className="flex flex-col items-center gap-2 text-sm font-black">
+                    <span className="h-8 w-8 animate-spin rounded-full border-4 border-white/35 border-t-white" />
+                    GIF 애니메이션 만드는 중...
+                  </div>
+                </div>
+              )}
+              {/* 사진 상단 컨트롤: GIF 효과 선택 + 미리보기 */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 bg-gradient-to-b from-black/60 via-black/30 to-transparent p-2 pr-12">
+                <div className="pointer-events-auto relative flex-1">
+                  <select
+                    value={gifEffect}
+                    onChange={(e) => selectGifEffect(e.target.value as GifEffectId)}
+                    disabled={gifBusy}
+                    aria-label="GIF 효과 선택"
+                    className="h-9 w-full appearance-none rounded-lg border border-white/30 bg-black/55 pl-3 pr-8 text-xs font-bold text-white outline-none backdrop-blur disabled:opacity-50"
+                  >
+                    {GIF_EFFECTS.map((effect) => (
+                      <option key={effect.id} value={effect.id} className="text-stone-800">
+                        {effect.emoji} {effect.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/80" />
+                </div>
+                <button
+                  onClick={handlePreviewGif}
+                  disabled={gifBusy || !expandedCard.cardImageUrl}
+                  className="pointer-events-auto flex h-9 shrink-0 items-center gap-1 rounded-lg bg-white/90 px-3 text-xs font-black text-[#7b310d] shadow transition active:scale-95 disabled:opacity-50"
+                >
+                  <Sparkles size={14} /> {gifPreviewUrl ? "다시" : "미리보기"}
+                </button>
+              </div>
             </div>
             <div className="bg-white px-4 py-3">
               <div className="flex items-center justify-between">
@@ -4811,31 +5208,86 @@ export function LibraryScreen() {
                 </div>
               )}
             </div>
-            <div className="flex gap-2 rounded-b-2xl bg-white px-4 pb-4">
+            <div className="space-y-2 rounded-b-2xl bg-white px-4 pb-4">
+              <button
+                onClick={handleSaveGif}
+                disabled={gifBusy || !expandedCard.cardImageUrl}
+                className="flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-[#7b310d] px-3 text-sm font-black text-white shadow transition active:scale-[0.99] disabled:opacity-60"
+              >
+                <Download size={16} />
+                {gifBusy
+                  ? "선택한 효과로 GIF 만드는 중..."
+                  : gifSaved
+                    ? "다운로드 완료 · 다시 저장"
+                    : `${GIF_EFFECTS.find((effect) => effect.id === gifEffect)?.label} GIF 바로 저장`}
+              </button>
+              {/* GIF 생성 후 활성화 — 움직이는 GIF + 랜덤 음악 공유 페이지 만들기 */}
+              <button
+                onClick={handleShareGif}
+                disabled={!gifBlob || gifBusy || shareBusy}
+                className="flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-sm font-black text-white shadow transition active:scale-[0.99] disabled:opacity-50"
+              >
+                <Share2 size={16} />
+                {shareBusy
+                  ? "공유 페이지 만드는 중..."
+                  : !gifBlob
+                    ? "먼저 GIF 미리보기를 만들어주세요"
+                    : shareUrl
+                      ? "공유 링크 다시 만들기"
+                      : "움직이는 카드 공유하기"}
+              </button>
+              {shareUrl && (
+                <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <span className="flex-1 truncate text-xs font-bold text-emerald-800">{shareUrl}</span>
+                  <a
+                    href={shareUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 rounded-md bg-emerald-600 px-3 py-1 text-xs font-bold text-white"
+                  >
+                    열기
+                  </a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard?.writeText(shareUrl);
+                        window.alert("공유 링크가 복사되었습니다.");
+                      } catch {
+                        window.open(shareUrl, "_blank");
+                      }
+                    }}
+                    className="shrink-0 rounded-md bg-white px-3 py-1 text-xs font-bold text-emerald-700 shadow"
+                  >
+                    복사
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-2">
               <button
                 onClick={async () => {
                   const imgUrl = expandedCard.cardImageUrl;
-                  if (!imgUrl) return;
+                  if (!imgUrl) {
+                    window.alert("이 카드는 아직 이미지가 없어 링크를 보낼 수 없어요.");
+                    return;
+                  }
+                  // 이미지 링크 공유 — 받는 사람이 링크를 열면 이미지가 바로 보인다.
                   if (navigator.share) {
                     try { await navigator.share({ title: expandedCard.name, url: imgUrl }); } catch { /* cancelled */ }
-                  } else {
+                  } else if (navigator.clipboard?.writeText) {
                     try {
-                      const res = await fetch(imgUrl);
-                      const blob = await res.blob();
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `마음카드_${expandedCard.name}_${Date.now()}.jpg`;
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      await navigator.clipboard.writeText(imgUrl);
+                      window.alert("이미지 링크가 복사되었습니다. 붙여넣어 보내면 바로 볼 수 있어요.");
                     } catch {
                       window.open(imgUrl, "_blank");
                     }
+                  } else {
+                    window.open(imgUrl, "_blank");
                   }
                 }}
                 className="flex flex-1 h-11 items-center justify-center gap-1.5 rounded-xl bg-white font-bold text-stone-700 shadow"
               >
-                <Share2 size={15} /> 공유하기
+                <Share2 size={15} /> 링크 보내기
               </button>
               <button
                 onClick={async () => {
@@ -4870,6 +5322,7 @@ export function LibraryScreen() {
               >
                 <Trash2 size={15} />
               </button>
+              </div>
             </div>
           </div>
         </div>

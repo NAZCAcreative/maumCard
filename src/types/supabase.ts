@@ -68,6 +68,7 @@ export interface Database {
           background_id: string;
           is_ai_bg: boolean;
           card_image_url: string | null;
+          gif_image_url: string | null;
           editor_state?: Json;
           compose_mode: string;
           share_token: string | null;
@@ -85,6 +86,7 @@ export interface Database {
           background_id: string;
           is_ai_bg?: boolean;
           card_image_url?: string | null;
+          gif_image_url?: string | null;
           editor_state?: Json;
           compose_mode?: string;
           share_token?: string | null;
@@ -99,6 +101,7 @@ export interface Database {
           background_id?: string;
           is_ai_bg?: boolean;
           card_image_url?: string | null;
+          gif_image_url?: string | null;
           editor_state?: Json;
           compose_mode?: string;
           share_token?: string | null;
@@ -159,6 +162,28 @@ export interface Database {
           category?: string;
           is_active?: boolean;
           sort_order?: number;
+        };
+      };
+      user_backgrounds: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          category: string;
+          storage_path: string;
+          url: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          name?: string;
+          category?: string;
+          storage_path: string;
+          url: string;
+        };
+        Update: {
+          name?: string;
+          category?: string;
         };
       };
       card_prompt_templates: {

@@ -41,19 +41,90 @@ export function buildFallbackBackground(bg: string): Buffer {
   `);
 }
 
-export async function loadBackground(bg: string): Promise<Buffer> {
+// 배경 사진 필터 — 미리보기/저장 카드에 동일하게 baked 된다.
+export type BgFilter = "none" | "bright" | "insta" | "bw" | "vintage";
+
+// 빈티지: 원본 픽셀은 그대로 두고 위에 비네팅 레이어만 씌운다.
+// 안쪽(가운데)은 투명, 바깥쪽(가장자리)으로 갈수록 원형으로 약간 어두워지는 그라데이션.
+function filmOverlaySvg(w: number, h: number): string {
+  return `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="vig" cx="50%" cy="50%" r="75%">
+        <stop offset="0%" stop-color="#1a1206" stop-opacity="0"/>
+        <stop offset="50%" stop-color="#1a1206" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#1a1206" stop-opacity="0.4"/>
+      </radialGradient>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#vig)"/>
+  </svg>`;
+}
+
+// 필름 레이어 표준 크기. 카드 비율(3:4)에 맞춘 PNG 를 한 번만 만들어 재사용한다.
+const FILM_OVERLAY_W = 1080;
+const FILM_OVERLAY_H = 1440;
+
+// feTurbulence 그레인 래스터화는 비싸므로, 필름 레이어 PNG 를 프로세스당 한 번만
+// 만들어 캐시한다(미리 만들어두기). 이후엔 베이스 크기로 리사이즈만 해서 덧댄다.
+let filmOverlayCache: Promise<Buffer> | null = null;
+function getFilmOverlay(): Promise<Buffer> {
+  if (!filmOverlayCache) {
+    filmOverlayCache = sharp(Buffer.from(filmOverlaySvg(FILM_OVERLAY_W, FILM_OVERLAY_H)))
+      .png()
+      .toBuffer();
+  }
+  return filmOverlayCache;
+}
+
+// 필터를 sharp 파이프라인으로 적용. none 이면 원본 그대로.
+export async function applyBgFilter(buf: Buffer, filter: BgFilter): Promise<Buffer> {
+  if (filter === "none") return buf;
+
+  // 빈티지는 이미지 변형 없이 필름 레이어만 합성.
+  // 미리 만들어 캐시한 필름 PNG 를 베이스 크기로 리사이즈해 위에 덧댄다(빠름).
+  if (filter === "vintage") {
+    const base = sharp(buf);
+    const meta = await base.metadata();
+    const w = meta.width ?? FILM_OVERLAY_W;
+    const h = meta.height ?? FILM_OVERLAY_H;
+    const cached = await getFilmOverlay();
+    const overlay = await sharp(cached).resize(w, h, { fit: "fill" }).png().toBuffer();
+    return base.composite([{ input: overlay, blend: "over" }]).toBuffer();
+  }
+
+  let img = sharp(buf);
+  switch (filter) {
+    case "bright": // 밝게: 밝기/채도 살짝 올림
+      img = img.modulate({ brightness: 1.16, saturation: 1.06 });
+      break;
+    case "insta": // 인스타: 대비·채도를 확실히 높인 쨍한 버전
+      img = img
+        .modulate({ brightness: 1.02, saturation: 1.55 })
+        .linear(1.22, -0.22 * 128); // 중간톤 유지하며 대비 강화
+      break;
+    case "bw": // 흑백 + 약간의 대비
+      img = img.grayscale().linear(1.12, -8);
+      break;
+  }
+  return img.toBuffer();
+}
+
+export async function loadBackground(bg: string, filter: BgFilter = "none"): Promise<Buffer> {
   const url = bg.startsWith("ai:")
     ? bg.slice(3)
     : bg.startsWith("http://") || bg.startsWith("https://") || bg.startsWith("data:")
       ? bg
       : "";
 
-  if (!url) return sharp(buildFallbackBackground(bg)).png().toBuffer();
-  if (url.startsWith("data:image/")) {
+  let base: Buffer;
+  if (!url) {
+    base = await sharp(buildFallbackBackground(bg)).png().toBuffer();
+  } else if (url.startsWith("data:image/")) {
     const [, encoded] = url.split(",", 2);
-    return Buffer.from(encoded, "base64");
+    base = await sharp(Buffer.from(encoded, "base64")).rotate().toBuffer();
+  } else {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("background fetch failed");
+    base = await sharp(Buffer.from(await res.arrayBuffer())).rotate().toBuffer();
   }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("background fetch failed");
-  return Buffer.from(await res.arrayBuffer());
+  return applyBgFilter(base, filter);
 }

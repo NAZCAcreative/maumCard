@@ -92,6 +92,7 @@ type RenderOpts = {
   titleBold?: boolean;
   contentBold?: boolean;
   footerBold?: boolean;
+  contentAlign?: "left" | "center" | "right";
   onMetrics?: (metrics: CardTextMetrics) => void;
 };
 
@@ -202,6 +203,10 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
   const footerColor = manualFooter ?? contentColor;
   const titleShadow = (manualTitle ? isLightHex(manualTitle) : dark) ? SHADOW_FOR_LIGHT : SHADOW_FOR_DARK;
   const contentShadow = (manualContent ? isLightHex(manualContent) : dark) ? SHADOW_FOR_LIGHT : SHADOW_FOR_DARK;
+
+  // 본문(BODY) 가로 정렬 — 좌/우 정렬은 textAlign + flex alignItems 둘 다 필요.
+  const contentAlign = opts.contentAlign ?? "center";
+  const contentAlignItems = contentAlign === "left" ? "flex-start" : contentAlign === "right" ? "flex-end" : "center";
 
   function normalizeBox(box: TextBox): TextBox {
     const nx0 = Math.min(0.96, Math.max(0.04, box.x0));
@@ -351,6 +356,8 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
                 wordBreak: "keep-all",
                 textShadow: contentShadow,
                 fontWeight: opts.contentBold ? 700 : 400,
+                textAlign: contentAlign,
+                alignItems: contentAlignItems,
               }, opts.contentRotation ?? 0)]
             : []),
           ...(subText && opts.omitTextPart !== "footer"
@@ -477,10 +484,13 @@ export async function renderCardImage(opts: RenderOpts): Promise<Buffer> {
         props: {
           style: {
             width: availW,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: contentAlignItems,
             fontSize: contentSize,
             color: contentColor,
             lineHeight: 1.5,
-            textAlign: "center",
+            textAlign: contentAlign,
             whiteSpace: "pre-wrap",
             wordBreak: "keep-all",
             textShadow: contentShadow,

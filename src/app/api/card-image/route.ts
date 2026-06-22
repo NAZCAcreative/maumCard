@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { CARD_HEIGHT, CARD_WIDTH, renderCardImage, type CardFont, type CardTextMetrics, type TextPosition } from "@/lib/card-text-render";
 import { composeCardWithAI } from "@/lib/card-ai-compose";
-import { loadBackground, resolveAccent } from "@/lib/card-background";
+import { loadBackground, applyBgFilter, resolveAccent, type BgFilter } from "@/lib/card-background";
 import { resolveCardFontId } from "@/lib/card-fonts";
 import sharp from "sharp";
 
@@ -17,6 +17,7 @@ type CardImageRequest = {
   name?: string;
   message?: string;
   bg?: string;
+  bg_filter?: string;
   purpose?: string;
   hand_font?: string;
   hand_tone?: string;
@@ -50,6 +51,7 @@ type CardImageRequest = {
   omit_text_part?: "title" | "content" | "footer";
   title_bold?: boolean;
   content_bold?: boolean;
+  content_align?: "left" | "center" | "right";
   footer_bold?: boolean;
   background_only?: boolean;
 };
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
   const name = body.name?.trim() || DEFAULT_NAME;
   const message = body.message?.trim() || DEFAULT_MESSAGE;
   const bg = body.bg?.trim() || "flower";
+  const bgFilter = (body.bg_filter?.trim() || "none") as BgFilter;
   const purpose = body.purpose?.trim() || "";
   const handFont = body.hand_font?.trim();
   const handTone = body.hand_tone?.trim();
@@ -82,9 +85,12 @@ export async function POST(request: Request) {
 
   if (body.background_only) {
     try {
-      const backgroundBuffer = await loadBackground(bg);
-      const imageBuffer = await sharp(backgroundBuffer)
+      // 효율: 원본을 먼저 카드 크기로 축소한 뒤 필터 적용(대용량 사진도 빠르게).
+      const backgroundBuffer = await loadBackground(bg, "none");
+      const resized = await sharp(backgroundBuffer)
         .resize(CARD_WIDTH, CARD_HEIGHT, { fit: "cover", position: "centre" })
+        .toBuffer();
+      const imageBuffer = await sharp(await applyBgFilter(resized, bgFilter))
         .png()
         .toBuffer();
       return new NextResponse(new Uint8Array(imageBuffer), {
@@ -103,7 +109,7 @@ export async function POST(request: Request) {
   // ── 기본 경로: 무료 로컬 텍스트 합성 (즉시·한글 정확·OpenAI 미사용) ──
   if (!aiCompose) {
     try {
-      const backgroundBuffer = await loadBackground(bg);
+      const backgroundBuffer = await loadBackground(bg, bgFilter);
       let textMetrics: CardTextMetrics | undefined;
       const imageBuffer = await renderCardImage({
         recipientLabel: recipientLabel ?? "", // 제목 (없으면 제목 없이 렌더)
@@ -132,6 +138,7 @@ export async function POST(request: Request) {
         omitTextPart: body.omit_text_part,
         titleBold: body.title_bold,
         contentBold: body.content_bold,
+        contentAlign: body.content_align,
         footerBold: body.footer_bold,
         onMetrics: (metrics) => { textMetrics = metrics; },
       });
@@ -154,7 +161,7 @@ export async function POST(request: Request) {
   let usedPrompt = "";
   let usedModel = "";
   try {
-    const backgroundBuffer = await loadBackground(bg);
+    const backgroundBuffer = await loadBackground(bg, bgFilter);
     const { imageBuffer, prompt, model } = await composeCardWithAI({
       backgroundBuffer,
       name,

@@ -73,6 +73,16 @@ export async function updateCardImageUrl(cardId: string, cardImageUrl: string | 
   if (error) throw error;
 }
 
+export async function updateCardGifUrl(cardId: string, gifImageUrl: string | null) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("card_library")
+    .update({ gif_image_url: gifImageUrl })
+    .eq("id", cardId);
+
+  if (error) throw error;
+}
+
 export async function deleteCard(cardId: string) {
   const supabase = createClient();
   const { error } = await supabase

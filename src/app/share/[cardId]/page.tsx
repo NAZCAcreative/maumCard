@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SmoothImage } from "@/components/ui/SmoothImage";
+import { ShareMusicPlayer } from "@/components/ui/ShareMusicPlayer";
 
 export const dynamic = "force-dynamic";
 
@@ -60,40 +61,49 @@ export default async function SharePage({ params }: Props) {
     : null;
 
   return (
-    <main className="mx-auto min-h-screen max-w-md bg-white px-4 py-8">
-      <div className="mb-6 text-center text-3xl font-black text-[#5a240d]">
-        마음카드
-      </div>
-
-      <div
-        className={`relative overflow-hidden rounded-xl bg-gradient-to-br ${bg.swatch} p-5 shadow-lg`}
-      >
-        {card?.card_image_url ? (
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-stone-950 px-4 py-8">
+      {/* 이미지 중심 — 카드 이미지/GIF 를 화면 가운데 크게 보여준다. */}
+      <div className="w-full max-w-md">
+        {card?.gif_image_url ? (
+          <SmoothImage
+            src={card.gif_image_url}
+            alt="공유 마음카드 (움직이는 GIF)"
+            className="w-full rounded-2xl shadow-2xl"
+          />
+        ) : card?.card_image_url ? (
           <SmoothImage
             src={card.card_image_url}
             alt="공유 마음카드"
-            className="w-full rounded-lg"
-          />
-        ) : aiBackgroundUrl ? (
-          <SmoothImage
-            src={aiBackgroundUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
+            className="w-full rounded-2xl shadow-2xl"
           />
         ) : (
-          <>
-            <div className="absolute -left-5 bottom-0 text-5xl font-black text-white/60">
-              {bg.mark}
-            </div>
-            <div className="absolute -right-3 top-3 text-4xl font-black text-white/70">
-              {bg.mark}
-            </div>
-          </>
+          <div
+            className={`relative aspect-[3/4] overflow-hidden rounded-2xl bg-gradient-to-br ${bg.swatch} shadow-2xl`}
+          >
+            {aiBackgroundUrl ? (
+              <>
+                <SmoothImage
+                  src={aiBackgroundUrl}
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 bg-white/20" />
+              </>
+            ) : (
+              <>
+                <div className="absolute -left-5 bottom-0 text-5xl font-black text-white/60">
+                  {bg.mark}
+                </div>
+                <div className="absolute -right-3 top-3 text-4xl font-black text-white/70">
+                  {bg.mark}
+                </div>
+              </>
+            )}
+          </div>
         )}
-        {aiBackgroundUrl && <div className="absolute inset-0 bg-white/20" />}
       </div>
 
-      <div className="mt-6 space-y-3">
+      <div className="w-full max-w-md space-y-3">
         <Link
           href="/create/background"
           className="grid h-14 place-items-center rounded-md bg-[#7b310d] text-lg font-bold text-white"
@@ -102,11 +112,13 @@ export default async function SharePage({ params }: Props) {
         </Link>
         <Link
           href="/"
-          className="grid h-12 place-items-center rounded-md border border-stone-200 font-semibold text-stone-700"
+          className="grid h-12 place-items-center rounded-md border border-white/20 font-semibold text-white/80"
         >
           홈으로
         </Link>
       </div>
+
+      <ShareMusicPlayer />
     </main>
   );
 }
