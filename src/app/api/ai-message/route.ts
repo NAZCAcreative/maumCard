@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+// Vercel: OpenAI 호출 지연 대비 실행시간 상향(기본 10s, Pro 플랜에서 적용).
+export const maxDuration = 60;
+
 type Purpose =
   | "birthday"
   | "love"

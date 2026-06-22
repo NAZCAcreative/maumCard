@@ -345,14 +345,69 @@ export interface Database {
           user_id: string;
           amount: number;
           reason: string;
+          idempotency_key: string | null;
           created_at: string;
         };
         Insert: {
           user_id: string;
           amount: number;
           reason: string;
+          idempotency_key?: string | null;
         };
         Update: never;
+      };
+      generation_jobs: {
+        Row: {
+          id: string;
+          user_id: string;
+          job_type: "ai_background";
+          status: "queued" | "processing" | "completed" | "failed";
+          payload: Json;
+          result: Json | null;
+          error_message: string | null;
+          idempotency_key: string;
+          reserved_credits: number;
+          attempts: number;
+          max_attempts: number;
+          priority: number;
+          available_at: string;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          job_type: "ai_background";
+          status?: "queued" | "processing" | "completed" | "failed";
+          payload?: Json;
+          result?: Json | null;
+          error_message?: string | null;
+          idempotency_key: string;
+          reserved_credits?: number;
+          attempts?: number;
+          max_attempts?: number;
+          priority?: number;
+          available_at?: string;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: "queued" | "processing" | "completed" | "failed";
+          payload?: Json;
+          result?: Json | null;
+          error_message?: string | null;
+          attempts?: number;
+          max_attempts?: number;
+          priority?: number;
+          available_at?: string;
+          started_at?: string | null;
+          completed_at?: string | null;
+          updated_at?: string;
+        };
       };
       system_settings: {
         Row: {
@@ -405,6 +460,30 @@ export interface Database {
           whitespace_test_enabled?: boolean;
           updated_at?: string;
         };
+      };
+    };
+    Functions: {
+      change_my_credits: {
+        Args: {
+          p_amount: number;
+          p_reason: string;
+          p_idempotency_key: string;
+        };
+        Returns: Array<{ balance: number; applied: boolean }>;
+      };
+      enqueue_generation_job: {
+        Args: {
+          p_job_type: string;
+          p_payload: Json;
+          p_idempotency_key: string;
+          p_credit_cost?: number;
+        };
+        Returns: Array<{
+          job_id: string;
+          job_status: string;
+          balance: number;
+          created: boolean;
+        }>;
       };
     };
   };

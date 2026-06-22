@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { changeCredits, InsufficientCreditsError } from "@/lib/credits";
 import { createClient } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+
+// Vercel: OpenAI 호출 지연 대비 실행시간 상향(기본 10s, Pro 플랜에서 적용).
+export const maxDuration = 60;
 
 type OpenAIChatResponse = {
   choices?: Array<{ message?: { content?: string } }>;
@@ -48,19 +52,24 @@ export async function POST(request: Request) {
         "Do not add extra sentences. Maintain paragraph breaks (\\n\\n).",
       ].join(" ");
 
-  // Check credits
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("credits")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile || profile.credits < 1) {
-    return NextResponse.json({ error: "크레딧이 부족합니다. AI 교정은 1크레딧이 필요합니다." }, { status: 402 });
-  }
-
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI 서비스를 사용할 수 없습니다." }, { status: 503 });
+
+  const requestKey = request.headers.get("idempotency-key")?.trim() || randomUUID();
+  let creditReserved = false;
+  try {
+    const credit = await changeCredits(supabase, {
+      amount: -1,
+      reason: "AI 문장 수정",
+      idempotencyKey: `ai-correct:${requestKey}`,
+    });
+    creditReserved = credit.applied;
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json({ error: "크레딧이 부족합니다. AI 교정은 1크레딧이 필요합니다." }, { status: 402 });
+    }
+    return NextResponse.json({ error: "크레딧 처리에 실패했습니다." }, { status: 500 });
+  }
 
   try {
     const model = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.5";
@@ -96,16 +105,19 @@ export async function POST(request: Request) {
       .filter((item) => item.length > 0);
     if (options.length === 0) throw new Error("수정 결과가 없습니다.");
 
-    // Deduct 1 credit
-    try {
-      await supabaseAdmin.from("profiles").update({ credits: Math.max(0, profile.credits - 1) }).eq("id", user.id);
-      await supabaseAdmin.from("credit_transactions").insert({ user_id: user.id, amount: -1, reason: "AI 문장 수정" });
-    } catch {
-      // non-critical
-    }
-
     return NextResponse.json({ corrected: options });
   } catch (err) {
+    if (creditReserved) {
+      try {
+        await changeCredits(supabase, {
+          amount: 1,
+          reason: "AI 문장 수정 환불",
+          idempotencyKey: `ai-correct-refund:${requestKey}`,
+        });
+      } catch (refundError) {
+        console.error("[ai-correct] credit refund failed:", refundError);
+      }
+    }
     return NextResponse.json({ error: err instanceof Error ? err.message : "AI 교정 실패" }, { status: 500 });
   }
 }

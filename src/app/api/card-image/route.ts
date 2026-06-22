@@ -6,6 +6,9 @@ import { loadBackground, applyBgFilter, resolveAccent, type BgFilter } from "@/l
 import { resolveCardFontId } from "@/lib/card-fonts";
 import sharp from "sharp";
 
+// Vercel: sharp 카드 합성이 길 수 있어 함수 실행시간 상향(기본 10s, Pro 플랜에서 적용).
+export const maxDuration = 60;
+
 type TextBoxRequest = {
   x0: number;
   y0: number;

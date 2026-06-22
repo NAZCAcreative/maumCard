@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { changeCredits } from "@/lib/credits";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS } from "@/lib/toss";
 
@@ -26,6 +27,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "결제 금액이 일치하지 않습니다." }, { status: 400 });
   }
 
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+
   const secretKey = process.env.TOSS_SECRET_KEY;
   if (secretKey) {
     const encoded = Buffer.from(`${secretKey}:`).toString("base64");
@@ -47,25 +54,16 @@ export async function POST(request: Request) {
     }
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("credits")
-    .eq("id", user.id)
-    .single();
-
-  const newCredits = (profile?.credits ?? 0) + plan.credits;
-  await supabase.from("profiles").update({ credits: newCredits }).eq("id", user.id);
-  await supabase.from("credit_transactions").insert({
-    user_id: user.id,
+  const credit = await changeCredits(supabase, {
     amount: plan.credits,
     reason: `purchase:${plan.id}:${orderId}`,
+    idempotencyKey: `purchase:${orderId}`,
   });
 
-  return NextResponse.json({ status: "paid", credits: plan.credits });
+  return NextResponse.json({
+    status: "paid",
+    credits: plan.credits,
+    balance: credit.balance,
+    applied: credit.applied,
+  });
 }
