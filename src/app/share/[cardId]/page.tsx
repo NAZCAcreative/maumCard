@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SmoothImage } from "@/components/ui/SmoothImage";
-import { ShareMusicPlayer } from "@/components/ui/ShareMusicPlayer";
+import { MusicPlayer } from "@/components/ui/MusicPlayer";
 
 export const dynamic = "force-dynamic";
 
@@ -118,7 +118,7 @@ export default async function SharePage({ params }: Props) {
         </Link>
       </div>
 
-      <ShareMusicPlayer />
+      <MusicPlayer autoPlay />
     </main>
   );
 }

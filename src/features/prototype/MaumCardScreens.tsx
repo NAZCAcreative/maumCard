@@ -50,6 +50,7 @@ import { CARD_FONTS } from "@/lib/card-fonts";
 import { ThemePanel } from "@/components/layout/ThemeSettings";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { SmoothImage } from "@/components/ui/SmoothImage";
+import { MusicPlayer } from "@/components/ui/MusicPlayer";
 import { generateRetroGif } from "@/lib/retro-gif";
 import { GIF_EFFECTS, type GifEffectId } from "@/lib/retro-effect";
 import { useSpeechToText } from "@/lib/useSpeechToText";
@@ -1752,6 +1753,7 @@ export function HomeScreen() {
         </div>
       </div>
       )}
+      <MusicPlayer positionClassName="bottom-24 right-5" />
     </PhoneShell>
   );
 }
