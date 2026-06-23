@@ -54,7 +54,7 @@ export function Onboarding() {
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-white">
       {/* 건너뛰기 */}
-      <div className="flex justify-end p-4">
+      <div className="flex justify-end px-4 py-2">
         <button
           type="button"
           onClick={finish}
@@ -71,12 +71,12 @@ export function Onboarding() {
         className="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {SLIDES.map((src, i) => (
-          <div key={src} className="flex w-full shrink-0 snap-center items-center justify-center px-6">
+          <div key={src} className="flex w-full shrink-0 snap-center items-start justify-center px-5 pt-1">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={src}
               alt={`마음카드 소개 ${i + 1}`}
-              className="max-h-full max-w-full rounded-2xl object-contain"
+              className="max-h-full w-full rounded-2xl object-contain object-top"
               draggable={false}
             />
           </div>
