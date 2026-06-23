@@ -6233,7 +6233,7 @@ export function AppBottomNav() {
             aria-current={active ? "page" : undefined}
             className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-center text-sm font-black leading-tight tracking-normal transition active:scale-95 sm:gap-1 sm:rounded-lg sm:py-1.5 ${
               active
-                ? "bg-secondary-container/40 text-primary"
+                ? "bg-secondary-container/70 text-primary"
                 : "text-on-surface-variant opacity-75 hover:bg-surface-variant/50"
             }`}
           >

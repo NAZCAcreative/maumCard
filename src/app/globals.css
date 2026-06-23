@@ -19,34 +19,34 @@
   --font-be-vietnam-pro: "Be Vietnam Pro";
   --font-plus-jakarta-sans: "Plus Jakarta Sans";
 
-  /* === Warm Bloom — Design System v2 === */
-  --app-bg: #fff8f7;
-  --app-surface: #ffffff;
+  /* === On-Maum — Sage & Cream Design System === */
+  --app-bg: #f1ebdd;
+  --app-surface: #faf6ee;
 
   /* Granular surface container scale */
   --app-surface-lowest: #ffffff;
-  --app-surface-low: #fcf1f1;
-  --app-surface-container: #f6ebeb;
-  --app-surface-high: #f0e6e5;
-  --app-surface-highest: #eae0e0;
+  --app-surface-low: #f4f0e4;
+  --app-surface-container: #eee9da;
+  --app-surface-high: #e8e2d0;
+  --app-surface-highest: #e1dac6;
   /* alias for backward compatibility */
-  --app-surface-muted: #f6ebeb;
+  --app-surface-muted: #eee9da;
 
-  --app-text: #1f1a1b;
-  --app-text-muted: #564241;
+  --app-text: #2a211a;
+  --app-text-muted: #5c4a3a;
 
   /* Brand */
-  --app-brand: #a13d3f;
-  --app-brand-strong: #6c151c;
-  --app-brand-soft: #ffdad8;
-  --app-brand-border: #dcc0bf;
-  --app-ring: rgba(161, 61, 63, 0.22);
+  --app-brand: #7b310d;
+  --app-brand-strong: #5e2509;
+  --app-brand-soft: #ecdcc9;
+  --app-brand-border: #d8c3a8;
+  --app-ring: rgba(123, 49, 13, 0.22);
 
   /* Containers */
-  --app-primary-container: #f47c7c;
-  --app-on-primary-container: #6c151c;
-  --app-secondary-container: #fdd3cb;
-  --app-on-secondary-container: #795953;
+  --app-primary-container: #f0c9a8;
+  --app-on-primary-container: #4d2509;
+  --app-secondary-container: #e3edcf;
+  --app-on-secondary-container: #4f6a38;
   --app-tertiary-container: #a79f8d;
   --app-on-tertiary-container: #3b3629;
 
@@ -247,11 +247,11 @@
   }
 
   html {
-    background: #fff8f7;
+    background: #f1ebdd;
   }
 
   body {
-    background: #fff8f7;
+    background: #f1ebdd;
     color: var(--app-text);
     @apply antialiased;
   }

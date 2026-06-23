@@ -52,7 +52,7 @@ export function Onboarding() {
   const isLast = index >= SLIDES.length - 1;
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-white">
+    <div className="fixed inset-x-0 top-0 z-[200] flex h-[100dvh] flex-col bg-white">
       {/* 건너뛰기 */}
       <div className="flex justify-end px-4 py-2">
         <button
