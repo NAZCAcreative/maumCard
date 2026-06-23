@@ -1570,13 +1570,13 @@ export function HomeScreen() {
       ) : (
       <div className="w-full max-w-none px-5 pb-8 pt-6 sm:mx-auto sm:max-w-5xl sm:px-4 sm:pt-5 lg:px-6">
         {/* 히어로 — 온마음 캐릭터 + 인사말 + 새 카드 만들기 */}
-        <section className="mb-5 overflow-hidden rounded-3xl bg-gradient-to-b from-[#e9f0dd] via-[#f2efe2] to-[#f7f3ea] p-5 shadow-sm ring-1 ring-[#cfdcb8]/50">
+        <section className="animate-pop-in mb-5 overflow-hidden rounded-3xl bg-gradient-to-b from-[#e9f0dd] via-[#f2efe2] to-[#f7f3ea] p-5 shadow-sm ring-1 ring-[#cfdcb8]/50">
           <div className="flex items-center gap-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo/logo_onmaum_char_01.png"
               alt="온마음 캐릭터"
-              className="h-20 w-20 shrink-0 object-contain drop-shadow-sm"
+              className="animate-char-bob h-20 w-20 shrink-0 object-contain drop-shadow-sm"
               draggable={false}
             />
             <div className="min-w-0">

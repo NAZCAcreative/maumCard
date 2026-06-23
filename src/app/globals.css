@@ -71,15 +71,15 @@
   --app-surface-muted: #eee9da;
   --app-text: #2a211a;
   --app-text-muted: #5c4a3a;
-  --app-brand: #7b310d;
-  --app-brand-strong: #5e2509;
-  --app-brand-soft: #ecdcc9;
-  --app-brand-border: #d8c3a8;
-  --app-ring: rgba(123, 49, 13, 0.22);
-  --app-primary-container: #f0c9a8;
-  --app-on-primary-container: #4d2509;
-  --app-secondary-container: #e3edcf;
-  --app-on-secondary-container: #4f6a38;
+  --app-brand: #5f7c43;
+  --app-brand-strong: #4a6234;
+  --app-brand-soft: #dfe9cb;
+  --app-brand-border: #bcd09a;
+  --app-ring: rgba(95, 124, 67, 0.22);
+  --app-primary-container: #cfe0b3;
+  --app-on-primary-container: #33491f;
+  --app-secondary-container: #e7ddc8;
+  --app-on-secondary-container: #6b4a2a;
   --app-tertiary-container: #cdd9b4;
   --app-on-tertiary-container: #3a4a28;
   --app-outline: #8a7a63;
@@ -979,10 +979,40 @@ html[data-theme="gradient-cosmic"] {
   will-change: opacity, transform;
 }
 
+/* 캐릭터/요소 마이크로 애니메이션 (재미 요소) */
+@keyframes charBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+.animate-char-bob { animation: charBob 1.8s ease-in-out infinite; }
+
+@keyframes softFloat {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50% { transform: translateY(-5px) rotate(1.5deg); }
+}
+.animate-soft-float { animation: softFloat 3.4s ease-in-out infinite; }
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.96) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-pop-in { animation: popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  75% { transform: rotate(4deg); }
+}
+.hover-wiggle:hover { animation: wiggle 0.5s ease-in-out; }
+
 /* 모션 민감 사용자 배려: 애니메이션 최소화 */
 @media (prefers-reduced-motion: reduce) {
   .route-transition,
-  .cute-page-enter {
+  .cute-page-enter,
+  .animate-char-bob,
+  .animate-soft-float,
+  .animate-pop-in,
+  .hover-wiggle:hover {
     animation: none;
   }
 }
