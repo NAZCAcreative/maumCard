@@ -1252,7 +1252,7 @@ function PhoneShell({
   hideHeader?: boolean;
 }) {
   return (
-    <main className="app-shell mx-auto min-h-screen w-full max-w-md text-stone-950 shadow-[0_0_0_1px_rgba(28,25,23,0.06)] sm:max-w-2xl lg:max-w-5xl">
+    <main className="app-shell min-h-screen w-full max-w-none text-stone-950 sm:mx-auto sm:max-w-2xl sm:shadow-[0_0_0_1px_rgba(28,25,23,0.06)] lg:max-w-5xl">
       {!hideHeader && <Header title={title} backHref={backHref} />}
       <div className={`cute-page-enter ${hideHeader ? "pb-28 sm:pb-24" : "px-5 pb-28 pt-6 sm:px-6 sm:pb-24 sm:pt-5 lg:px-8"}`}>{children}</div>
     </main>
@@ -1566,7 +1566,7 @@ export function HomeScreen() {
           <div className="h-7 w-7 animate-spin rounded-full border-2 border-stone-200 border-t-[#7b310d]" />
         </div>
       ) : (
-      <div className="mx-auto max-w-5xl px-4 pt-5 pb-8 lg:px-6">
+      <div className="w-full max-w-none px-5 pb-8 pt-6 sm:mx-auto sm:max-w-5xl sm:px-4 sm:pt-5 lg:px-6">
         {/* 인사말 */}
         <section className="mb-5 flex items-center gap-3">
           {user ? (
@@ -6210,7 +6210,7 @@ export function AppBottomNav() {
   ];
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto grid h-[calc(5.5rem+env(safe-area-inset-bottom))] w-full max-w-md grid-cols-5 rounded-t-2xl border-t border-outline-variant/30 bg-surface-container-low/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(28,25,23,0.08)] backdrop-blur-lg sm:h-20 sm:max-w-2xl sm:rounded-t-xl sm:pb-0 lg:max-w-5xl">
+    <nav className="fixed inset-x-0 bottom-0 z-30 grid h-[calc(5.5rem+env(safe-area-inset-bottom))] w-full max-w-none grid-cols-5 rounded-t-2xl border-t border-outline-variant/30 bg-surface-container-low/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(28,25,23,0.08)] backdrop-blur-lg sm:mx-auto sm:h-20 sm:max-w-2xl sm:rounded-t-xl sm:pb-0 lg:max-w-5xl">
       {items.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (

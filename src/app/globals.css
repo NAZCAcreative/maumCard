@@ -998,6 +998,9 @@ html[data-click-spring="true"] [role="button"]:active {
     font-size: calc(18px * var(--font-scale)) !important;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    width: 100%;
+    min-width: 100%;
+    overflow-x: hidden;
   }
 
   html[data-theme] {
@@ -1005,7 +1008,21 @@ html[data-click-spring="true"] [role="button"]:active {
   }
 
   body {
+    width: 100%;
+    min-width: 100%;
+    margin: 0;
+    overflow-x: hidden;
     line-height: 1.55;
+  }
+
+  #__next,
+  .route-transition,
+  .app-shell {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
   }
 
   .app-shell .text-\[10px\],

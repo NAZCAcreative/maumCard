@@ -119,7 +119,7 @@ export default async function SharePage({ params }: Props) {
         </Link>
       </div>
 
-      <MusicPlayer autoPlay />
+      <MusicPlayer autoPlay autoPlayDelayMs={1500} />
     </main>
   );
 }

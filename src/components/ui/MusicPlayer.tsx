@@ -20,10 +20,13 @@ function trackLabel(url: string): string {
  */
 export function MusicPlayer({
   autoPlay = false,
+  autoPlayDelayMs = 0,
   initialTrack = null,
   positionClassName = "bottom-5 right-5",
 }: {
   autoPlay?: boolean;
+  /** 자동재생 시도까지의 지연(ms). GIF 등 콘텐츠 다운로드 시간을 고려해 텀을 준다. */
+  autoPlayDelayMs?: number;
   initialTrack?: string | null;
   positionClassName?: string;
 }) {
@@ -44,9 +47,45 @@ export function MusicPlayer({
     audio.src = track;
     audioRef.current = audio;
     setReady(true);
+
+    let cancelled = false;
+    let removeInteraction = () => {};
+
     if (autoPlay) {
-      audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      // 브라우저는 소리 자동재생을 제스처 전까지 막으므로,
+      // (1) 지연 후 자동재생 시도 → (2) 막히면 첫 사용자 동작(터치/스크롤/클릭) 때 시작.
+      const startOnInteraction = () => {
+        const handler = () => {
+          audio.play().then(() => setPlaying(true)).catch(() => {});
+        };
+        const opts: AddEventListenerOptions = { once: true, passive: true };
+        window.addEventListener("pointerdown", handler, opts);
+        window.addEventListener("touchstart", handler, opts);
+        window.addEventListener("keydown", handler, opts);
+        window.addEventListener("scroll", handler, opts);
+        removeInteraction = () => {
+          window.removeEventListener("pointerdown", handler);
+          window.removeEventListener("touchstart", handler);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("scroll", handler);
+        };
+      };
+
+      const timer = window.setTimeout(() => {
+        if (cancelled) return;
+        audio.play().then(() => setPlaying(true)).catch(() => startOnInteraction());
+      }, autoPlayDelayMs);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+        removeInteraction();
+        audio.pause();
+        audio.src = "";
+        audioRef.current = null;
+      };
     }
+
     return () => {
       audio.pause();
       audio.src = "";
