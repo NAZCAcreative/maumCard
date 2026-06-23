@@ -1204,30 +1204,30 @@ function Header({ title, backHref }: { title?: string; backHref?: string }) {
   const [themeOpen, setThemeOpen] = useState(false);
   return (
     <>
-      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-stone-200 bg-white/95 px-4">
+      <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-stone-200 bg-white/95 px-5 sm:h-[68px] sm:px-4">
         {backHref ? (
-          <Link href={backHref} aria-label="뒤로가기" className="grid h-10 w-10 place-items-center">
-            <ChevronLeft size={24} />
+          <Link href={backHref} aria-label="뒤로가기" className="grid h-12 w-12 place-items-center sm:h-10 sm:w-10">
+            <ChevronLeft size={28} />
           </Link>
         ) : (
-          <button type="button" aria-label="뒤로가기" onClick={() => router.back()} className="grid h-10 w-10 place-items-center">
-            <ChevronLeft size={24} />
+          <button type="button" aria-label="뒤로가기" onClick={() => router.back()} className="grid h-12 w-12 place-items-center sm:h-10 sm:w-10">
+            <ChevronLeft size={28} />
           </button>
         )}
         <div className="text-center">
-          <div className="text-lg font-black leading-none text-[#5a240d]">💞 마음카드</div>
-          <div className="mt-1 text-[11px] font-semibold text-stone-600">{title ?? "마음을 전하는 감성 메시지"}</div>
+          <div className="text-xl font-black leading-none text-[#5a240d] sm:text-lg">💞 마음카드</div>
+          <div className="mt-1 text-sm font-semibold text-stone-600 sm:text-[11px]">{title ?? "마음을 전하는 감성 메시지"}</div>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setThemeOpen(true)}
-            className="grid h-9 w-9 place-items-center rounded-full text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
+            className="grid h-11 w-11 place-items-center rounded-full text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 sm:h-9 sm:w-9"
             aria-label="디자인 설정"
           >
-            <Settings size={18} />
+            <Settings size={22} />
           </button>
-          <Link href="/mypage" aria-label="마이페이지" className="grid h-9 w-9 place-items-center">
+          <Link href="/mypage" aria-label="마이페이지" className="grid h-11 w-11 place-items-center sm:h-9 sm:w-9">
             {user
               ? <Avatar url={user.avatarUrl} nickname={user.nickname} size={34} />
               : <User size={20} className="text-stone-500" />
@@ -1254,7 +1254,7 @@ function PhoneShell({
   return (
     <main className="app-shell mx-auto min-h-screen w-full max-w-md text-stone-950 shadow-[0_0_0_1px_rgba(28,25,23,0.06)] sm:max-w-2xl lg:max-w-5xl">
       {!hideHeader && <Header title={title} backHref={backHref} />}
-      <div className={`cute-page-enter ${hideHeader ? "pb-24" : "px-4 pb-24 pt-5 sm:px-6 lg:px-8"}`}>{children}</div>
+      <div className={`cute-page-enter ${hideHeader ? "pb-28 sm:pb-24" : "px-5 pb-28 pt-6 sm:px-6 sm:pb-24 sm:pt-5 lg:px-8"}`}>{children}</div>
     </main>
   );
 }
@@ -1263,7 +1263,7 @@ function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       {...props}
-      className={`w-full rounded-md bg-[#7b310d] px-4 py-3 text-center font-bold text-white shadow-sm transition active:scale-[0.99] disabled:bg-stone-300 ${props.className ?? ""}`}
+      className={`min-h-14 w-full rounded-xl bg-[#7b310d] px-5 py-3.5 text-center text-lg font-bold text-white shadow-sm transition active:scale-[0.99] disabled:bg-stone-300 sm:min-h-0 sm:rounded-md sm:px-4 sm:py-3 sm:text-base ${props.className ?? ""}`}
     />
   );
 }
@@ -4944,6 +4944,9 @@ export function LibraryScreen() {
       const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(fileName);
       await updateCardGifUrl(card.id, publicUrl);
 
+      // 방금 올린 GIF 를 CDN 에 미리 한 번 요청해 공유 페이지 첫 로드 시 전파 지연(빈 화면) 완화.
+      try { await fetch(publicUrl, { cache: "reload" }); } catch { /* ignore */ }
+
       const url = `${window.location.origin}/share/${card.id}`;
       setShareUrl(url);
 
@@ -4954,8 +4957,13 @@ export function LibraryScreen() {
       } else if (navigator.clipboard?.writeText) {
         try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
       }
-    } catch {
-      window.alert("카드 공유에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } catch (error) {
+      const msg = error instanceof Error
+        ? error.message
+        : typeof error === "object" && error && "message" in error
+          ? String((error as { message: unknown }).message)
+          : String(error);
+      window.alert(`카드 공유에 실패했어요.\n(사유: ${msg})`);
     } finally {
       setShareBusy(false);
     }
@@ -6202,7 +6210,7 @@ export function AppBottomNav() {
   ];
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto grid h-[calc(4.75rem+env(safe-area-inset-bottom))] w-full max-w-md grid-cols-5 rounded-t-xl border-t border-outline-variant/30 bg-surface-container-low/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(28,25,23,0.08)] backdrop-blur-lg sm:h-20 sm:max-w-2xl sm:pb-0 lg:max-w-5xl">
+    <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto grid h-[calc(5.5rem+env(safe-area-inset-bottom))] w-full max-w-md grid-cols-5 rounded-t-2xl border-t border-outline-variant/30 bg-surface-container-low/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(28,25,23,0.08)] backdrop-blur-lg sm:h-20 sm:max-w-2xl sm:rounded-t-xl sm:pb-0 lg:max-w-5xl">
       {items.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (
@@ -6210,13 +6218,13 @@ export function AppBottomNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1.5 py-1.5 text-center text-xs font-black leading-tight tracking-normal transition active:scale-95 sm:text-sm ${
+            className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-center text-sm font-black leading-tight tracking-normal transition active:scale-95 sm:gap-1 sm:rounded-lg sm:py-1.5 ${
               active
                 ? "bg-secondary-container/40 text-primary"
                 : "text-on-surface-variant opacity-75 hover:bg-surface-variant/50"
             }`}
           >
-            <Icon size={22} strokeWidth={active ? 2.6 : 2} fill={active && href === "/" ? "currentColor" : "none"} />
+            <Icon className="h-7 w-7 sm:h-[22px] sm:w-[22px]" strokeWidth={active ? 2.6 : 2} fill={active && href === "/" ? "currentColor" : "none"} />
             <span className="block w-full truncate">{label}</span>
           </Link>
         );

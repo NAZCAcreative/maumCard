@@ -991,3 +991,70 @@ html[data-click-spring="true"] [role="button"]:active {
   user-select: none;
   animation: particlePop 0.8s cubic-bezier(0.15, 0.85, 0.35, 1) forwards;
 }
+
+/* === Mobile readability and touch sizing === */
+@media (max-width: 639px) {
+  html {
+    font-size: calc(18px * var(--font-scale)) !important;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  html[data-theme] {
+    font-size: calc(18px * var(--font-scale)) !important;
+  }
+
+  body {
+    line-height: 1.55;
+  }
+
+  .app-shell .text-\[10px\],
+  .app-shell .text-\[11px\],
+  .app-shell .text-\[12px\],
+  .app-shell .text-xxs,
+  .app-shell .text-xs {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .app-shell .text-\[13px\],
+  .app-shell .text-sm {
+    font-size: 16px !important;
+    line-height: 1.5 !important;
+  }
+
+  .app-shell input,
+  .app-shell textarea,
+  .app-shell select {
+    min-height: 52px;
+    font-size: 16px !important;
+    line-height: 1.5;
+  }
+
+  .app-shell textarea {
+    min-height: 120px;
+  }
+
+  .app-shell button:not([aria-label]),
+  .app-shell a[role="button"] {
+    min-height: 48px;
+  }
+
+  .theme-settings-panel h2 {
+    font-size: 20px !important;
+  }
+
+  .theme-settings-panel h3,
+  .theme-settings-panel button,
+  .theme-settings-panel select,
+  .theme-settings-panel select option {
+    font-size: 16px !important;
+  }
+
+  .theme-settings-panel p,
+  .theme-settings-panel span,
+  .theme-settings-panel button span,
+  .theme-settings-panel button span.block.font-bold {
+    font-size: 14px !important;
+  }
+}

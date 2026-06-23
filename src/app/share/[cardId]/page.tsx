@@ -69,6 +69,7 @@ export default async function SharePage({ params }: Props) {
             src={card.gif_image_url}
             alt="공유 마음카드 (움직이는 GIF)"
             className="w-full rounded-2xl shadow-2xl"
+            retryCount={6}
           />
         ) : card?.card_image_url ? (
           <SmoothImage
