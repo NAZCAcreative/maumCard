@@ -5065,7 +5065,7 @@ export function LibraryScreen() {
         ))}
       </div>
       {loading && (
-        <div className="mt-10 grid place-items-center py-12 text-sm font-semibold text-stone-400">
+        <div className="grid place-items-center py-8 text-sm font-semibold text-stone-400">
           불러오는 중...
         </div>
       )}
