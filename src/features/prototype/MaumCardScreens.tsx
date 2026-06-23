@@ -51,6 +51,7 @@ import { ThemePanel } from "@/components/layout/ThemeSettings";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { SmoothImage } from "@/components/ui/SmoothImage";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
+import { Onboarding } from "@/components/ui/Onboarding";
 import { generateRetroGif } from "@/lib/retro-gif";
 import { GIF_EFFECTS, type GifEffectId } from "@/lib/retro-effect";
 import { useSpeechToText } from "@/lib/useSpeechToText";
@@ -1531,6 +1532,7 @@ export function HomeScreen() {
 
   return (
     <PhoneShell hideHeader>
+      <Onboarding />
       <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-stone-200 bg-white/95 px-4 backdrop-blur-md">
         <Link href="/" className="grid h-10 w-10 place-items-center" aria-label="홈">
           <ChevronLeft size={24} />
