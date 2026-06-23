@@ -7,7 +7,7 @@ const SLIDES = [
   "/preview/onma_pre02.PNG",
   "/preview/onma_pre03.PNG",
 ];
-const STORAGE_KEY = "maumcard:onboarded";
+const STORAGE_KEY = "maumcard:onboarded:v2";
 
 /**
  * 첫 진입 온보딩 — 미리보기 3장 좌우 스와이프, 마지막 장에서 "시작하기".
@@ -68,7 +68,7 @@ export function Onboarding() {
       <div
         ref={scrollerRef}
         onScroll={handleScroll}
-        className="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {SLIDES.map((src, i) => (
           <div key={src} className="flex w-full shrink-0 snap-center items-start justify-center px-5 pt-1">
