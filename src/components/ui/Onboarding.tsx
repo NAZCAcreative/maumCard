@@ -8,6 +8,9 @@ const SLIDES = [
   "/preview/onma_pre03.PNG",
 ];
 const STORAGE_KEY = "maumcard:onboarded:v2";
+// ⚠️ 출시 전 false 로 변경 → 그때부터 "첫 진입 1회만" 노출.
+// 현재 true: 테스트 편의를 위해 진입 때마다 노출.
+const ALWAYS_SHOW_FOR_TESTING = true;
 
 /**
  * 첫 진입 온보딩 — 미리보기 3장 좌우 스와이프, 마지막 장에서 "시작하기".
@@ -19,6 +22,10 @@ export function Onboarding() {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (ALWAYS_SHOW_FOR_TESTING) {
+      setShow(true);
+      return;
+    }
     try {
       if (!window.localStorage.getItem(STORAGE_KEY)) setShow(true);
     } catch {
