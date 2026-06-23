@@ -1215,7 +1215,7 @@ function Header({ title, backHref }: { title?: string; backHref?: string }) {
           </button>
         )}
         <div className="text-center">
-          <div className="text-xl font-black leading-none text-[#5a240d] sm:text-lg">💞 마음카드</div>
+          <SmoothImage src="/logo/logo_onmaum_01.png" alt="ON마음" className="mx-auto h-8 w-auto sm:h-7" />
           <div className="mt-1 text-sm font-semibold text-stone-600 sm:text-[11px]">{title ?? "마음을 전하는 감성 메시지"}</div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -1536,7 +1536,7 @@ export function HomeScreen() {
           <ChevronLeft size={24} />
         </Link>
         <div className="text-center">
-          <div className="text-lg font-black leading-none text-[#5a240d]">💞 마음카드</div>
+          <SmoothImage src="/logo/logo_onmaum_01.png" alt="ON마음" className="mx-auto h-8 w-auto" />
           <div className="mt-1 text-[11px] font-semibold text-stone-600">마음을 전하는 감성 메시지</div>
         </div>
         <div className="flex items-center gap-1.5">
