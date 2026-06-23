@@ -20,13 +20,6 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import BottomNav from "@/components/layout/BottomNav";
 
-type StatCard = {
-  label: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
-};
-
 type MenuItem = {
   href: string;
   title: string;
@@ -41,17 +34,6 @@ type MenuGroup = {
   items: MenuItem[];
 };
 
-async function safeCount(table: string, filters?: Array<[string, string, unknown]>) {
-  let query = supabaseAdmin.from(table as never).select("id", { count: "exact", head: true });
-  for (const [column, operator, value] of filters ?? []) {
-    if (operator === "eq") query = query.eq(column as never, value as never);
-    if (operator === "gte") query = query.gte(column as never, value as never);
-  }
-  const { count, error } = await query;
-  if (error) return 0;
-  return count ?? 0;
-}
-
 export default async function AdminPage() {
   const supabase = await createClient();
   const {
@@ -61,95 +43,13 @@ export default async function AdminPage() {
   if (!user) redirect("/login?next=/admin");
   if (!isAdminUser(user)) notFound();
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-  const [
-    profileCount,
-    backgroundCount,
-    activeBackgroundCount,
-    homeCardCount,
-    activeHomeCardCount,
-    anniversaryCount,
-    activeAnniversaryCount,
-    promptTemplateCount,
-    activePromptTemplateCount,
-    phraseCount,
-    activePhraseCount,
-    logCount7d,
-    settingsResult,
-  ] = await Promise.all([
-    safeCount("profiles"),
-    safeCount("backgrounds"),
-    safeCount("backgrounds", [["is_active", "eq", true]]),
-    safeCount("home_featured_cards"),
-    safeCount("home_featured_cards", [["is_active", "eq", true]]),
-    safeCount("common_anniversaries"),
-    safeCount("common_anniversaries", [["is_active", "eq", true]]),
-    safeCount("card_prompt_templates"),
-    safeCount("card_prompt_templates", [["is_active", "eq", true]]),
-    safeCount("curated_phrases"),
-    safeCount("curated_phrases", [["is_active", "eq", true]]),
-    safeCount("generation_logs", [["created_at", "gte", sevenDaysAgo.toISOString()]]),
-    supabaseAdmin
-      .from("system_settings")
-      .select("signup_bonus_credits, ai_suggestions_enabled, announcement_enabled, announcement_title")
-      .eq("id", "default")
-      .maybeSingle(),
-  ]);
+  const settingsResult = await supabaseAdmin
+    .from("system_settings")
+    .select("signup_bonus_credits, ai_suggestions_enabled, announcement_enabled, announcement_title")
+    .eq("id", "default")
+    .maybeSingle();
 
   const announcementTitle = settingsResult.data?.announcement_title?.trim();
-
-  const stats: StatCard[] = [
-    {
-      label: "프로필",
-      value: profileCount.toLocaleString(),
-      description: "현재 가입된 사용자 프로필",
-      icon: <Users size={18} />,
-    },
-    {
-      label: "배경",
-      value: `${activeBackgroundCount}/${backgroundCount}`,
-      description: "활성 배경 / 전체 배경",
-      icon: <ImageIcon size={18} />,
-    },
-    {
-      label: "메인 카드",
-      value: `${activeHomeCardCount}/${homeCardCount}`,
-      description: "활성 홈 카드 / 전체 홈 카드",
-      icon: <Sparkles size={18} />,
-    },
-    {
-      label: "기념일",
-      value: `${activeAnniversaryCount}/${anniversaryCount}`,
-      description: "활성 공통 기념일 / 전체 기념일",
-      icon: <CalendarDays size={18} />,
-    },
-    {
-      label: "프롬프트",
-      value: `${activePromptTemplateCount}/${promptTemplateCount}`,
-      description: "활성 프롬프트 / 전체 프롬프트",
-      icon: <FileText size={18} />,
-    },
-    {
-      label: "문구",
-      value: `${activePhraseCount}/${phraseCount}`,
-      description: "활성 문구 / 전체 문구",
-      icon: <MessageSquareText size={18} />,
-    },
-    {
-      label: "7일 로그",
-      value: logCount7d.toLocaleString(),
-      description: "최근 7일 AI 생성 로그",
-      icon: <ScrollText size={18} />,
-    },
-    {
-      label: "가입 보너스",
-      value: `${settingsResult.data?.signup_bonus_credits ?? 3}C`,
-      description: "신규 가입 기본 지급 크레딧",
-      icon: <CreditCard size={18} />,
-    },
-  ];
 
   const menuGroups: MenuGroup[] = [
     {
@@ -285,19 +185,6 @@ export default async function AdminPage() {
             <p className="mt-1 text-xs font-semibold text-amber-700">현재 공지 배너가 활성화되어 있습니다.</p>
           </section>
         )}
-
-        <section className="grid gap-3 border-b border-stone-100 py-5 sm:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-stone-500">{stat.label}</p>
-                <span className="grid size-8 place-items-center rounded-md bg-stone-100 text-stone-700">{stat.icon}</span>
-              </div>
-              <p className="mt-3 text-2xl font-black text-stone-900">{stat.value}</p>
-              <p className="mt-1 text-xs font-semibold leading-5 text-stone-500">{stat.description}</p>
-            </div>
-          ))}
-        </section>
 
         <section className="space-y-6 py-5">
           {menuGroups.map((group) => (
