@@ -3024,10 +3024,11 @@ export function PreviewScreen() {
       setWhitespaceReady(true);
       return;
     }
+    // 빈공간 탐지는 배경 사진 자체에만 의존한다. (필터는 색감만 바꾸므로 글씨 위치를 바꾸지 않도록 bgFilter 제외)
     fetch("/api/whitespace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bg: draft.bg, bg_filter: draft.bgFilter || "none" }),
+      body: JSON.stringify({ bg: draft.bg, bg_filter: "none" }),
     })
       .then((res) => res.json())
       .then((data: { region?: WsRegion }) => {
@@ -3040,7 +3041,7 @@ export function PreviewScreen() {
         if (!cancelled) setWhitespaceReady(true);
       });
     return () => { cancelled = true; };
-  }, [draft.bg, draft.bgFilter, draftHydrated]);
+  }, [draft.bg, draftHydrated]);
 
   useEffect(() => {
     if (!draftHydrated || !whitespaceReady) return;
@@ -3892,67 +3893,39 @@ export function PreviewScreen() {
   }, [done, layoutSettled]);
 
   if (!done) {
-    const sparkles = ["✨", "💫", "🌸", "💌", "🌟", "✿"];
     const loadingStage =
-      progress < 20 ? "배경과 문구 조화를 찾는 중..."
-      : progress < 45 ? "감성 레이아웃 계산 중..."
-      : progress < 70 ? "캘리그래피 최적 위치 배치 중..."
-      : progress < 90 ? "마지막 감성 터치 추가 중..."
-      : "거의 완성됐어요!";
+      progress < 20 ? "배경과 문구 조화를 찾는 중"
+      : progress < 45 ? "감성 레이아웃 계산 중"
+      : progress < 70 ? "캘리그래피 위치 배치 중"
+      : progress < 90 ? "마지막 감성 터치 추가 중"
+      : "거의 완성됐어요";
 
     return (
       <PhoneShell backHref="/">
-        <div className="flex min-h-[640px] flex-col items-center justify-center text-center">
-          {/* 반짝이는 파티클 (hydration 이후 클라이언트 전용 렌더 — SSR 불일치 방지) */}
-          <div className="relative mb-2 h-40 w-40" suppressHydrationWarning>
-            {draftHydrated && sparkles.map((s, i) => (
-              <span
-                key={i}
-                className="absolute text-2xl"
-                style={{
-                  top: `${(20 + Math.sin((i * Math.PI * 2) / sparkles.length) * 40).toFixed(3)}%`,
-                  left: `${(20 + Math.cos((i * Math.PI * 2) / sparkles.length) * 40).toFixed(3)}%`,
-                  animation: `ping ${(1.2 + i * 0.3).toFixed(1)}s ease-in-out ${(i * 0.2).toFixed(1)}s infinite`,
-                  opacity: 0.7,
-                }}
-              >
-                {s}
-              </span>
-            ))}
-            <div className="absolute inset-4 rounded-full border-[8px] border-orange-100/50" />
-            <div className="absolute inset-4 animate-spin rounded-full border-[8px] border-transparent border-t-[#7b310d] border-r-[#d98238]" style={{ animationDuration: "1.5s" }} />
-            <div className="absolute inset-8 animate-spin rounded-full border-4 border-transparent border-b-orange-300 border-l-[#f0b35c]" style={{ animationDuration: "2s", animationDirection: "reverse" }} />
-            <div className="absolute inset-0 flex items-center justify-center text-4xl rounded-full">💌</div>
+        <div className="flex min-h-[640px] flex-col items-center justify-center px-8 text-center">
+          {/* 미니멀 스피너 */}
+          <div className="relative h-12 w-12">
+            <div className="absolute inset-0 rounded-full border-2 border-stone-200/70" />
+            <div
+              className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#7b310d]"
+              style={{ animationDuration: "0.9s" }}
+            />
           </div>
-          <h1 className="mt-4 text-xl font-black leading-8 text-[#5a240d]">마음을 담아<br />카드를 만들고 있어요.</h1>
-          <p className="mt-2 text-sm font-semibold text-stone-500 transition-opacity duration-300">{loadingStage}</p>
-          <div className="mt-6 w-full max-w-xs">
-            <div className="mb-2 flex items-center justify-between text-xs font-bold text-stone-500">
-              <span>✨ 감성 카드 생성</span>
-              <span>{Math.floor(progress)}%</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-stone-100">
+          <h1 className="mt-7 text-lg font-bold tracking-tight text-[#5a240d]">카드를 만들고 있어요</h1>
+          <p className="mt-1.5 h-5 text-sm font-medium text-stone-400 transition-opacity duration-300">
+            {loadingStage}
+          </p>
+          {/* 슬림 프로그레스 */}
+          <div className="mt-8 w-full max-w-[260px]">
+            <div className="h-1 overflow-hidden rounded-full bg-stone-100">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-[#7b310d] via-[#d98238] to-[#f0b35c] transition-all duration-200"
+                className="h-full rounded-full bg-[#7b310d] transition-all duration-300 ease-out"
                 style={{ width: `${Math.min(progress, 100)}%` }}
               />
             </div>
-            <div className="mt-1 flex justify-between text-[10px] font-semibold text-stone-400">
-              <span>시작</span>
-              <span>예상 시간: 약 1분 30초</span>
+            <div className="mt-2 text-right text-[11px] font-semibold tabular-nums text-stone-400">
+              {Math.floor(progress)}%
             </div>
-          </div>
-          <div className="mt-5 flex gap-3 text-xs font-semibold text-stone-400">
-            {["배경 분석", "문구 배치", "감성 합성"].map((step, i) => (
-              <span
-                key={step}
-                className={`flex items-center gap-1 rounded-full px-3 py-1 ${
-                  progress > i * 33 ? "bg-orange-100 text-[#7b310d]" : "bg-stone-100"
-                }`}
-              >
-                {progress > i * 33 + 33 ? "✓" : "·"} {step}
-              </span>
-            ))}
           </div>
         </div>
       </PhoneShell>
