@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import type { FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { redirectToGoogleLogin, sendEmailLoginLink } from "@/lib/auth";
+import { InAppBrowserNotice } from "@/components/ui/InAppBrowserNotice";
 
 function LoginContent() {
   const searchParams = useSearchParams();
@@ -59,6 +60,7 @@ function LoginContent() {
       </div>
 
       <div className="w-full space-y-4">
+        <InAppBrowserNotice />
         <button
           type="button"
           onClick={handleGoogleLogin}
