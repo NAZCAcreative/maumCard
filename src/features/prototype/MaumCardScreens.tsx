@@ -5071,11 +5071,11 @@ export function LibraryScreen() {
       )}
       {expandedCard && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(7vh,env(safe-area-inset-top))]"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(3vh,env(safe-area-inset-top))]"
           onClick={() => setExpandedCard(null)}
         >
           <div
-            className="relative max-h-[calc(100dvh-9vh)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white shadow-2xl"
+            className="relative max-h-[calc(100dvh-5vh)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <button
