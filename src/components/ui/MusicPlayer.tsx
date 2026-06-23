@@ -42,11 +42,24 @@ export function MusicPlayer({
   // 오디오 1개 생성 후 첫 트랙 로드 + (옵션) 자동재생 시도
   useEffect(() => {
     const audio = new Audio();
-    audio.loop = true;
+    audio.loop = false; // 반복 대신 곡 끝나면 다음 랜덤 곡 재생
     audio.volume = 0.6;
     audio.src = track;
     audioRef.current = audio;
     setReady(true);
+
+    // 현재 곡이 끝나면 (가능하면 다른) 랜덤 곡으로 이어서 재생
+    const playNextRandom = () => {
+      let next = pickRandomMusic();
+      let guard = 0;
+      while (SHARE_MUSIC.length > 1 && audio.src.endsWith(next) && guard++ < 8) {
+        next = pickRandomMusic();
+      }
+      audio.src = next;
+      setTrack(next);
+      audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    };
+    audio.addEventListener("ended", playNextRandom);
 
     let cancelled = false;
     let removeInteraction = () => {};

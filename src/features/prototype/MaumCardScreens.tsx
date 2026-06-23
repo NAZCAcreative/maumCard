@@ -1582,6 +1582,14 @@ export function HomeScreen() {
           </div>
         </section>
 
+        {/* 핵심 행동 — 새 카드 만들기 (상단 고정) */}
+        <Link
+          href="/create/background"
+          className="mb-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#7b310d] text-base font-black text-white shadow-sm transition active:scale-[0.99] hover:brightness-105"
+        >
+          <Sparkles size={18} /> 새 카드 만들기
+        </Link>
+
         {/* 다가오는 기념일 */}
         {visibleUpcomingItems.length > 0 && (
           <section className="mb-5">
