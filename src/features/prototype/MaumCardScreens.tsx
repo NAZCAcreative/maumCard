@@ -1569,28 +1569,31 @@ export function HomeScreen() {
         </div>
       ) : (
       <div className="w-full max-w-none px-5 pb-8 pt-6 sm:mx-auto sm:max-w-5xl sm:px-4 sm:pt-5 lg:px-6">
-        {/* 인사말 */}
-        <section className="mb-5 flex items-center gap-3">
-          {user ? (
-            <Avatar url={user.avatarUrl} nickname={user.nickname} size={44} />
-          ) : (
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-primary-container bg-surface-container-low text-primary">
-              <User size={20} />
+        {/* 히어로 — 온마음 캐릭터 + 인사말 + 새 카드 만들기 */}
+        <section className="mb-5 overflow-hidden rounded-3xl bg-gradient-to-b from-[#e9f0dd] via-[#f2efe2] to-[#f7f3ea] p-5 shadow-sm ring-1 ring-[#cfdcb8]/50">
+          <div className="flex items-center gap-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo/logo_onmaum_char_01.png"
+              alt="온마음 캐릭터"
+              className="h-20 w-20 shrink-0 object-contain drop-shadow-sm"
+              draggable={false}
+            />
+            <div className="min-w-0">
+              <p className="text-[13px] font-bold text-[#7b9a5a]">안녕하세요,</p>
+              <h2 className="mt-0.5 text-lg font-black leading-snug text-[#4d3b2a]">
+                {displayName}님<br />
+                <span className="text-[#7b9a5a]">오늘도 따뜻한 마음을 전해요</span>
+              </h2>
             </div>
-          )}
-          <div>
-            <p className="text-[13px] font-semibold text-stone-500">안녕하세요,</p>
-            <h2 className="text-lg font-black leading-tight text-stone-900">{displayName}님 <span className="text-primary">오늘도 따뜻한 하루!</span></h2>
           </div>
+          <Link
+            href="/create/background"
+            className="mt-4 flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#7b310d] text-base font-black text-white shadow-sm transition active:scale-[0.99] hover:brightness-105"
+          >
+            <Sparkles size={18} /> 새 카드 만들기
+          </Link>
         </section>
-
-        {/* 핵심 행동 — 새 카드 만들기 (상단 고정) */}
-        <Link
-          href="/create/background"
-          className="mb-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#7b310d] text-base font-black text-white shadow-sm transition active:scale-[0.99] hover:brightness-105"
-        >
-          <Sparkles size={18} /> 새 카드 만들기
-        </Link>
 
         {/* 다가오는 기념일 */}
         {visibleUpcomingItems.length > 0 && (
