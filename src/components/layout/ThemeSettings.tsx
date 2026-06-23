@@ -3,7 +3,7 @@
 import { Check, MonitorCog, Palette, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type ThemeId = "silver-warm" | "silver-contrast" | "sophisticated" | "youth-mint" | "youth-peach" | "korean-palace" | "gradient-cosmic";
+type ThemeId = "onmaum" | "silver-warm" | "silver-contrast" | "sophisticated" | "youth-mint" | "youth-peach" | "korean-palace" | "gradient-cosmic";
 
 const themes: Array<{
   id: ThemeId;
@@ -11,6 +11,12 @@ const themes: Array<{
   description: string;
   swatches: string[];
 }> = [
+  {
+    id: "onmaum",
+    name: "온마음 기본",
+    description: "새싹 캐릭터의 세이지 그린과 크림, 따뜻한 브라운이 어우러진 기본 테마",
+    swatches: ["#7b310d", "#faf6ee", "#7b9a5a"],
+  },
   {
     id: "silver-warm",
     name: "큰글씨 온화 모드",
@@ -66,12 +72,12 @@ function applyTheme(theme: ThemeId) {
 }
 
 export function ThemePanel({ onClose }: { onClose: () => void }) {
-  const [theme, setTheme] = useState<ThemeId>("silver-warm");
+  const [theme, setTheme] = useState<ThemeId>("onmaum");
   const [fontSize, setFontSizeState] = useState<"normal" | "large" | "xlarge">("normal");
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
-    const initial: ThemeId = isThemeId(saved) ? saved : "silver-warm";
+    const initial: ThemeId = isThemeId(saved) ? saved : "onmaum";
     setTheme(initial);
 
     const savedSize = window.localStorage.getItem("maumcard:font-size");
@@ -186,7 +192,7 @@ export function ThemePanel({ onClose }: { onClose: () => void }) {
 export default function ThemeSettings() {
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
-    const initial: ThemeId = isThemeId(saved) ? saved : "silver-warm";
+    const initial: ThemeId = isThemeId(saved) ? saved : "onmaum";
     applyTheme(initial);
 
     const savedSize = window.localStorage.getItem("maumcard:font-size");

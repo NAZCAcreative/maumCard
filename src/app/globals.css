@@ -59,6 +59,33 @@
   --shadow-level-2: 0 4px 16px -2px rgba(161, 61, 63, 0.18), 0 2px 6px rgba(161, 61, 63, 0.06);
 }
 
+/* === On-Maum 기본 컨셉 — 세이지 그린 + 크림 + 브라운 (캐릭터/프리뷰 톤) === */
+:root[data-theme="onmaum"] {
+  --app-bg: #f1ebdd;
+  --app-surface: #faf6ee;
+  --app-surface-lowest: #ffffff;
+  --app-surface-low: #f4f0e4;
+  --app-surface-container: #eee9da;
+  --app-surface-high: #e8e2d0;
+  --app-surface-highest: #e1dac6;
+  --app-surface-muted: #eee9da;
+  --app-text: #2a211a;
+  --app-text-muted: #5c4a3a;
+  --app-brand: #7b310d;
+  --app-brand-strong: #5e2509;
+  --app-brand-soft: #ecdcc9;
+  --app-brand-border: #d8c3a8;
+  --app-ring: rgba(123, 49, 13, 0.22);
+  --app-primary-container: #f0c9a8;
+  --app-on-primary-container: #4d2509;
+  --app-secondary-container: #e3edcf;
+  --app-on-secondary-container: #4f6a38;
+  --app-tertiary-container: #cdd9b4;
+  --app-on-tertiary-container: #3a4a28;
+  --app-outline: #8a7a63;
+  --app-outline-variant: #d8c3a8;
+}
+
 :root[data-theme="silver-warm"] {
   --app-bg: #fffdf9;
   --app-surface: #ffffff;

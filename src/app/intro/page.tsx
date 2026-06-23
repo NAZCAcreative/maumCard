@@ -1,45 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { markOnboarded } from "@/lib/onboarding";
 
 const SLIDES = [
   "/preview/onma_pre01.PNG",
   "/preview/onma_pre02.PNG",
   "/preview/onma_pre03.PNG",
 ];
-const STORAGE_KEY = "maumcard:onboarded:v2";
-// ⚠️ 출시 전 false 로 변경 → 그때부터 "첫 진입 1회만" 노출.
-// 현재 true: 테스트 편의를 위해 진입 때마다 노출.
-const ALWAYS_SHOW_FOR_TESTING = true;
 
-/**
- * 첫 진입 온보딩 — 미리보기 3장 좌우 스와이프, 마지막 장에서 "시작하기".
- * localStorage 플래그로 한 번만 노출한다.
- */
-export function Onboarding() {
-  const [show, setShow] = useState(false);
+/** 프리뷰(온보딩) 독립 페이지 — 미리보기 3장 좌우 스와이프, 마지막 장에서 시작하기 → 홈. */
+export default function IntroPage() {
+  const router = useRouter();
   const [index, setIndex] = useState(0);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (ALWAYS_SHOW_FOR_TESTING) {
-      setShow(true);
-      return;
-    }
-    try {
-      if (!window.localStorage.getItem(STORAGE_KEY)) setShow(true);
-    } catch {
-      setShow(true);
-    }
-  }, []);
-
   const finish = () => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, "1");
-    } catch {
-      /* ignore */
-    }
-    setShow(false);
+    markOnboarded();
+    router.replace("/");
   };
 
   const scrollToIndex = (i: number) => {
@@ -54,13 +33,10 @@ export function Onboarding() {
     setIndex(Math.round(el.scrollLeft / el.clientWidth));
   };
 
-  if (!show) return null;
-
   const isLast = index >= SLIDES.length - 1;
 
   return (
-    <div className="fixed inset-x-0 top-0 z-[200] flex h-[100dvh] flex-col bg-white">
-      {/* 건너뛰기 */}
+    <main className="mx-auto flex h-[100dvh] max-w-md flex-col bg-surface">
       <div className="flex justify-end px-4 py-2">
         <button
           type="button"
@@ -71,7 +47,6 @@ export function Onboarding() {
         </button>
       </div>
 
-      {/* 슬라이드 (좌우 스와이프) */}
       <div
         ref={scrollerRef}
         onScroll={handleScroll}
@@ -90,7 +65,6 @@ export function Onboarding() {
         ))}
       </div>
 
-      {/* 하단: 인디케이터 + 버튼 */}
       <div className="flex flex-col items-center gap-4 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
         <div className="flex gap-2">
           {SLIDES.map((_, i) => (
@@ -99,7 +73,7 @@ export function Onboarding() {
               type="button"
               aria-label={`${i + 1}번째 소개로 이동`}
               onClick={() => scrollToIndex(i)}
-              className={`h-2 rounded-full transition-all ${i === index ? "w-6 bg-[#7b310d]" : "w-2 bg-stone-300"}`}
+              className={`h-2 rounded-full transition-all ${i === index ? "w-6 bg-primary" : "w-2 bg-stone-300"}`}
             />
           ))}
         </div>
@@ -107,7 +81,7 @@ export function Onboarding() {
           <button
             type="button"
             onClick={finish}
-            className="h-14 w-full rounded-2xl bg-[#7b310d] text-base font-black text-white shadow-sm transition active:scale-[0.99]"
+            className="h-14 w-full rounded-2xl bg-primary text-base font-black text-white shadow-sm transition active:scale-[0.99]"
           >
             시작하기
           </button>
@@ -121,6 +95,6 @@ export function Onboarding() {
           </button>
         )}
       </div>
-    </div>
+    </main>
   );
 }
