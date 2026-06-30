@@ -4,7 +4,7 @@ import { drawRetroFrame, makeSparkles, type GifEffectId } from "./retro-effect";
 
 const GIF_MAX_WIDTH = 320; // GIF 용량/속도 위해 폭 제한 (카드 3:4)
 const GIF_FRAMES = 18;
-const GIF_DELAY_MS = 110;
+const GIF_DELAY_MS = 300;
 
 // fetch → blob → objectURL 로 같은-출처 이미지를 만들어 canvas 오염(taint)을 피한다.
 async function loadImageViaBlob(url: string): Promise<HTMLImageElement> {
